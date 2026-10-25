@@ -22,9 +22,14 @@ from src.db.courses.chapters import Chapter
 from src.db.courses.course_chapters import CourseChapter
 from src.db.courses.courses import Course
 from src.db.courses.learning_state import LearningCourseState
+from src.services.learning.rich_text import markdown_to_doc, task_doc
 
 
 _FACTORY_NAMESPACE = UUID("ae21a8f6-34d8-558c-8450-330269534eff")
+_TASK_NOTE = (
+    "Diese Aufgabe bearbeitest du in der Übung mit dem Lern-Tutor. Dort wird deine "
+    "Antwort bewertet und du bekommst Hinweise."
+)
 _HASH_PATTERN = r"^[0-9a-f]{64}$"
 
 
@@ -223,6 +228,7 @@ async def apply_factory_draft(
             title=lesson.title,
             kind="lesson",
             content={
+                **markdown_to_doc(lesson.body),
                 "markdown": lesson.body,
                 "concept_ids": lesson.concept_ids,
                 "claims": [item.model_dump(mode="json") for item in lesson.claims],
@@ -241,12 +247,13 @@ async def apply_factory_draft(
             source_id=activity.activity_id,
             title=activity.prompt,
             kind=activity.type,
+            # The page reaches the learner's browser: the question only. Expected answer and
+            # rubric stay in the Learning engine, which grades.
             content={
+                **task_doc(activity.prompt, _TASK_NOTE),
                 "prompt": activity.prompt,
-                "expected_answer": activity.expected_answer,
                 "concept_ids": activity.concept_ids,
                 "citation_ids": activity.citation_ids,
-                "rubric": [item.model_dump(mode="json") for item in activity.rubric],
             },
             order=activity_count + 1,
             now=now,
@@ -282,19 +289,12 @@ async def _add_activity(
     order: int,
     now: str,
 ) -> None:
-    is_lesson = kind == "lesson"
+    # Lessons and tasks are page documents: the Markdown subtype only loads a URL and
+    # the assignment subtype rendered an empty page with a grading button.
     row = Activity(
         name=title,
-        activity_type=(
-            ActivityTypeEnum.TYPE_DYNAMIC
-            if is_lesson
-            else ActivityTypeEnum.TYPE_ASSIGNMENT
-        ),
-        activity_sub_type=(
-            ActivitySubTypeEnum.SUBTYPE_DYNAMIC_MARKDOWN
-            if is_lesson
-            else ActivitySubTypeEnum.SUBTYPE_ASSIGNMENT_ANY
-        ),
+        activity_type=ActivityTypeEnum.TYPE_DYNAMIC,
+        activity_sub_type=ActivitySubTypeEnum.SUBTYPE_DYNAMIC_PAGE,
         content=content,
         details={"learning_kind": kind},
         published=False,

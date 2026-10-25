@@ -147,6 +147,19 @@ async def test_factory_draft_maps_real_course_structure_and_has_readback(
         "lesson",
         "case",
     }
+    # Live (25.10.): the Markdown subtype only loads a URL ("No markdown URL
+    # configured") and assignments rendered empty. Both are page documents now,
+    # and a task page never carries the expected answer or the rubric.
+    by_kind = {activity.extra_metadata["learning_kind"]: activity for activity in activities}
+    for activity in activities:
+        assert activity.activity_sub_type == "SUBTYPE_DYNAMIC_PAGE"
+        assert activity.content["type"] == "doc"
+    lesson_text = json.dumps(by_kind["lesson"].content["content"])
+    assert "Provider execution stays behind OpenFang." in lesson_text
+    task = by_kind["case"].content
+    assert "expected_answer" not in task and "rubric" not in task
+    assert "Route through OpenFang." not in json.dumps(task)
+    assert task["content"][0]["content"][0]["text"] == "Choose the authorized path."
 
 
 @pytest.mark.asyncio
