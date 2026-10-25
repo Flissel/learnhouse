@@ -15,6 +15,8 @@ import {
 
 export interface PracticeState {
   turn: PracticeTurn | null
+  // The engine answers with the next task already chosen; it waits here until "next".
+  pending?: PracticeTurn | null
   hint?: string
   tutor?: { answer: string; nextStep: string }
   busy: boolean
@@ -55,16 +57,17 @@ export function usePracticeSession(courseId: string | null) {
     const turn = state.turn
     if (!turn) throw new Error('Keine aktive Sitzung')
     const reply = await answerPractice(turn.session_id, turn.session_revision, answer, token)
-    return { turn: reply.result.session ?? turn, hint: undefined }
+    const after = reply.result.session ?? turn
+    // Keep the answered task on screen with its feedback; the next one waits.
+    return { turn: { ...after, task: turn.task, state: after.state === 'active' ? 'active' : turn.state }, pending: after, hint: undefined }
   }), [run, state.turn, token])
 
   const next = useCallback(() => run(async () => {
     const turn = state.turn
     if (!turn) throw new Error('Keine aktive Sitzung')
-    const reply = await currentPractice(turn.session_id, token)
-    const fresh = reply.result.session ?? turn
-    return { turn: { ...fresh, feedback: null }, hint: undefined }
-  }), [run, state.turn, token])
+    const fresh = state.pending ?? (await currentPractice(turn.session_id, token)).result.session ?? turn
+    return { turn: { ...fresh, feedback: null }, pending: null, hint: undefined, tutor: undefined }
+  }), [run, state.pending, state.turn, token])
 
   const hint = useCallback(() => run(async () => {
     const turn = state.turn
@@ -79,7 +82,9 @@ export function usePracticeSession(courseId: string | null) {
     const reply = await askPracticeTutor(turn.session_id, courseId, question, token)
     const tutor = reply.result.tutor
     if (!tutor) throw new Error('Der Tutor hat nicht geantwortet.')
-    return { tutor: { answer: tutor.answer, nextStep: tutor.next_step } }
+    // The tutor cites sources by internal keys (S1, S2); the learner sees the evidence instead.
+    const plain = (text: string) => text.replace(/\s*\((?:S\d+(?:,\s*)?)+\)/g, '').replace(/\bS\d+\b/g, 'der Quelle')
+    return { tutor: { answer: plain(tutor.answer), nextStep: plain(tutor.next_step) } }
   }), [courseId, run, state.turn, token])
 
   return { state, start, submit, next, hint, ask, signedIn: Boolean(token) }
