@@ -68,10 +68,13 @@ def _person(user: PublicUser) -> PublicUser:
     return user
 
 
-async def _call(tool: str, event: dict[str, Any], *, write: bool = False) -> dict[str, Any]:
+async def _call(tool: str, event: dict[str, Any], *, write: bool = False, fresh: bool = False) -> dict[str, Any]:
     url = os.environ.get(MCP_URL_ENV, "http://learning-mcp:8091/mcp")
     event = {"invocation_id": str(uuid4()), "correlation_id": str(uuid4()), **event}
-    if write:
+    if write and fresh:
+        # A new session on every start; a deterministic key would replay the first one forever.
+        event["idempotency_key"] = f"lh-{uuid4().hex}"
+    elif write:
         keyed = {k: v for k, v in event.items() if k not in ("invocation_id", "correlation_id")}
         event["idempotency_key"] = "lh-" + hashlib.sha256(
             (tool + json.dumps(keyed, sort_keys=True)).encode()
@@ -115,7 +118,7 @@ async def start_session(
         "actor": _actor(user, await _org_of(db_session, user)),
         "course_id": str(UUID(course.course_uuid.removeprefix("course_"))),
         "payload": {"course_revision": state.revision, "mode": payload.mode, "blueprint": blueprint},
-    }, write=True)
+    }, write=True, fresh=True)
 
 
 async def _org_of(db_session: AsyncSession, user: PublicUser) -> int:

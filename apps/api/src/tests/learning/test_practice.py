@@ -41,8 +41,8 @@ async def test_practice_is_per_person_and_forwards_to_the_engine(db, monkeypatch
     _enable_local_mode(monkeypatch)
     calls = []
 
-    async def fake_call(tool, event, *, write=False):
-        calls.append((tool, event, write))
+    async def fake_call(tool, event, *, write=False, fresh=False):
+        calls.append((tool, event, write or fresh))
         return {"state": "completed", "result": {"session": {"session_id": str(uuid4())}}, "evidence": None}
 
     monkeypatch.setattr(practice, "_call", fake_call)
