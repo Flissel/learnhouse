@@ -5,6 +5,8 @@ import { Bot, BookOpen, PanelLeft } from 'lucide-react'
 import { getUriWithOrg } from '@services/config/config'
 import { useLearningIntents } from '@/hooks/useLearningIntents'
 import { useLearningActions } from '@/hooks/useLearningActions'
+import { usePracticeSession } from '@/hooks/usePracticeSession'
+import { practiceModel } from '@/lib/learning/practiceModel'
 import type { LearningIntent } from '@/services/learning/intents'
 
 import AgentPanel from './AgentPanel'
@@ -78,6 +80,9 @@ export default function LearningShell({ orgslug, courses, state }: LearningShell
     () => courses.find((course) => course.id === selectedCourseId) ?? courses[0] ?? null,
     [courses, selectedCourseId],
   )
+  // Without the VibeMind desktop host the player practises through the LearnHouse backend.
+  const practice = usePracticeSession(selectedCourse?.id ?? null)
+  const browserPractice = !learningActions.available
 
   const learningHref = getUriWithOrg(orgslug, '/learning')
   const coursesHref = getUriWithOrg(orgslug, '/courses')
@@ -181,17 +186,30 @@ export default function LearningShell({ orgslug, courses, state }: LearningShell
                 }).catch(() => undefined)
               } : undefined}
             />
+          ) : selectedCourse && browserPractice ? (
+            <LearningPlayer
+              course={selectedCourse}
+              courseHref={courseHref}
+              model={practiceModel(practice.state.turn, {
+                mode: playerMode, hint: practice.state.hint, busy: practice.state.busy, error: practice.state.error,
+              })}
+              onModeChange={setPlayerMode}
+              onStartSession={practice.signedIn ? () => { void practice.start(playerMode) } : undefined}
+              onSubmit={(answer) => { void practice.submit(answer) }}
+              onHint={() => { void practice.hint() }}
+              onNext={() => { void practice.next() }}
+            />
           ) : selectedCourse ? (
             <LearningPlayer
               course={selectedCourse}
               courseHref={courseHref}
               model={{ ...emptyLearningPlayerModel(), mode: playerMode }}
               onModeChange={setPlayerMode}
-              onStartSession={learningActions.available ? () => {
+              onStartSession={() => {
                 void learningActions.invoke({
                   version: '1', operation: 'session_start', course_id: selectedCourse.id, mode: playerMode,
                 }).catch(() => undefined)
-              } : undefined}
+              }}
             />
           ) : null}
         </LearningWorkspace>
@@ -199,6 +217,9 @@ export default function LearningShell({ orgslug, courses, state }: LearningShell
           course={selectedCourse}
           state={state}
           visibleOnCompact={compactPanel === 'agent'}
+          onAsk={browserPractice && practice.state.turn ? (question) => { void practice.ask(question) } : undefined}
+          tutor={practice.state.tutor}
+          busy={practice.state.busy}
         />
       </div>
       <StatusStrip connectionState={connectionState} state={state} />

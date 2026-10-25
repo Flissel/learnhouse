@@ -8,6 +8,7 @@ def mount_local_learning_bootstrap(target_router: APIRouter) -> bool:
         return False
 
     from src.routers.learning import bootstrap
+    from src.routers.learning import practice
     from src.routers.learning import service
 
     target_router.include_router(
@@ -17,6 +18,11 @@ def mount_local_learning_bootstrap(target_router: APIRouter) -> bool:
     )
     target_router.include_router(
         service.router,
+        prefix="/learning",
+        tags=["learning"],
+    )
+    target_router.include_router(
+        practice.router,
         prefix="/learning",
         tags=["learning"],
     )

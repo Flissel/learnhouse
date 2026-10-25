@@ -11,7 +11,12 @@ interface TaskBase {
 export interface MultipleChoiceTask extends TaskBase {
   type: 'multiple_choice'
   options: Array<{ id: string; label: string }>
+  // Several options may be right: checkboxes instead of radio buttons.
+  multiple?: boolean
 }
+
+/** What the Learning engine scores: one option, several options, or text. */
+export type TaskAnswer = { choice_id: string } | { choice_ids: string[] } | { text: string }
 
 export interface OpenResponseTask extends TaskBase {
   type: 'open_response' | 'case' | 'code'
@@ -27,14 +32,22 @@ export type LearningTask = MultipleChoiceTask | OpenResponseTask | CanvasTask
 interface TaskRendererProps {
   task: LearningTask
   submitLabel: string
-  onSubmit?: (_answer: string) => void
+  onSubmit?: (_answer: TaskAnswer) => void
+  disabled?: boolean
 }
 
-export default function TaskRenderer({ task, submitLabel, onSubmit }: TaskRendererProps) {
+export function answerFromForm(task: LearningTask, form: FormData): TaskAnswer {
+  if (task.type === 'multiple_choice') {
+    const chosen = form.getAll('answer').map(String)
+    return task.multiple ? { choice_ids: chosen } : { choice_id: chosen[0] ?? '' }
+  }
+  return { text: String(form.get('answer') ?? '') }
+}
+
+export default function TaskRenderer({ task, submitLabel, onSubmit, disabled }: TaskRendererProps) {
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    onSubmit?.(String(form.get('answer') ?? ''))
+    onSubmit?.(answerFromForm(task, new FormData(event.currentTarget)))
   }
 
   return (
@@ -51,8 +64,8 @@ export default function TaskRenderer({ task, submitLabel, onSubmit }: TaskRender
                   className="mt-1 accent-emerald-700"
                   id={index === 0 ? 'answer' : undefined}
                   name="answer"
-                  required
-                  type="radio"
+                  required={!task.multiple}
+                  type={task.multiple ? 'checkbox' : 'radio'}
                   value={option.id}
                 />
                 <span className="min-w-0 break-words text-sm text-zinc-900">{option.label}</span>
@@ -61,7 +74,7 @@ export default function TaskRenderer({ task, submitLabel, onSubmit }: TaskRender
           </fieldset>
         ) : task.type === 'canvas' ? (
           <div className="border-s-4 border-cyan-600 bg-cyan-50 px-4 py-4">
-            <p className="text-sm text-zinc-700">Diese Aufgabe wird im PenEcho-Arbeitsbereich bearbeitet.</p>
+            <p className="text-sm text-zinc-700">Diese Zeichenaufgabe öffnest du über den Lern-Agenten; dort zeichnest du und gibst selbst ab.</p>
             {task.canvasHref ? (
               <a className="mt-3 inline-flex text-sm font-semibold text-cyan-800 underline" href={task.canvasHref} id="answer">
                 Canvas öffnen
@@ -85,7 +98,7 @@ export default function TaskRenderer({ task, submitLabel, onSubmit }: TaskRender
 
       <button
         className="mt-5 inline-flex h-10 items-center justify-center rounded-md bg-zinc-950 px-5 text-sm font-semibold text-white hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
-        disabled={!onSubmit || task.type === 'canvas'}
+        disabled={!onSubmit || disabled || task.type === 'canvas'}
         type="submit"
       >
         {submitLabel}

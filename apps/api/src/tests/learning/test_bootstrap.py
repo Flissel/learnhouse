@@ -126,7 +126,7 @@ def test_bootstrap_router_is_mounted_only_for_explicit_local_mode(monkeypatch):
     monkeypatch.setenv("LEARNHOUSE_LOCAL_LEARNING_MODE", "true")
     enabled_router = APIRouter()
     assert mount(enabled_router) is True
-    assert len(enabled_router.routes) == 2
+    assert len(enabled_router.routes) == 3  # bootstrap, service, practice
 
 
 @pytest.mark.asyncio

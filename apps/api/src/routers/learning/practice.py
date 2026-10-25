@@ -1,0 +1,189 @@
+"""Practice in the Learning Player for the signed-in LearnHouse person.
+
+The browser never talks to the Learning engine directly: these routes take the person
+from the LearnHouse session, check read access to the course and forward the action to
+learning-mcp with the person as learner (``lh-<org>-<user_uuid>``). Mastery is therefore
+per person and per organisation (one instance, one organisation per customer).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+from typing import Annotated, Any, Literal
+from uuid import UUID, uuid4
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.events.database import get_db_session
+from src.db.user_organizations import UserOrganization
+from src.db.users import PublicUser
+from src.routers.learning.service import _authorize_course, _course_by_public_id, _state_for_course
+from src.security.auth import get_current_user
+from src.security.rbac import AccessAction
+
+router = APIRouter()
+MCP_URL_ENV = "LEARNING_MCP_URL"
+_TIMEOUT_S = 660.0
+_UNSAFE = re.compile(r"[^A-Za-z0-9._:-]")
+
+
+class _Strict(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class SessionStart(_Strict):
+    course_id: str = Field(min_length=1, max_length=80)
+    mode: Literal["training", "exam"] = "training"
+
+
+class AnswerWrite(_Strict):
+    revision: int = Field(ge=1)
+    answer: dict[str, Any]
+
+
+class HintRequest(_Strict):
+    task_id: str = Field(min_length=1, max_length=80)
+
+
+class TutorQuestion(_Strict):
+    question: Annotated[str, Field(min_length=1, max_length=2_000)]
+
+
+def learner_id(user: PublicUser, org_id: int | None) -> str:
+    """The person as Learning learner; same person, same id across sessions."""
+    raw = f"lh-{org_id or 0}-{user.user_uuid}"
+    return _UNSAFE.sub("-", raw)[:128]
+
+
+def _person(user: PublicUser) -> PublicUser:
+    if not isinstance(user, PublicUser) or not getattr(user, "user_uuid", None):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="sign in to practise")
+    return user
+
+
+async def _call(tool: str, event: dict[str, Any], *, write: bool = False) -> dict[str, Any]:
+    url = os.environ.get(MCP_URL_ENV, "http://learning-mcp:8091/mcp")
+    event = {"invocation_id": str(uuid4()), "correlation_id": str(uuid4()), **event}
+    if write:
+        keyed = {k: v for k, v in event.items() if k not in ("invocation_id", "correlation_id")}
+        event["idempotency_key"] = "lh-" + hashlib.sha256(
+            (tool + json.dumps(keyed, sort_keys=True)).encode()
+        ).hexdigest()[:40]
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": event}}
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT_S) as client:
+            response = await client.post(url, json=body)
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="learning unavailable") from error
+    message = response.json() if response.status_code == 200 else {}
+    try:
+        payload = json.loads(message["result"]["content"][0]["text"])
+    except (KeyError, IndexError, TypeError, ValueError) as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="learning gave no answer") from error
+    if message["result"].get("isError"):
+        error = payload.get("error")
+        detail = error.get("message") if isinstance(error, dict) else str(error or "rejected")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(detail)[:300])
+    return {"state": payload.get("state"), "result": payload.get("result") or {}, "evidence": payload.get("evidence")}
+
+
+def _actor(user: PublicUser, org_id: int | None) -> dict[str, str]:
+    return {"actor_id": learner_id(user, org_id), "actor_type": "local_user"}
+
+
+@router.post("/practice/sessions")
+async def start_session(
+    payload: SessionStart,
+    request: Request,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    user = _person(current_user)
+    course = await _course_by_public_id(db_session, payload.course_id.removeprefix("course_"))
+    await _authorize_course(request, db_session, user, course, AccessAction.READ)
+    state = await _state_for_course(db_session, course)
+    blueprint = {"max_attempts": 20} if payload.mode == "training" else {"item_count": 10}
+    return await _call("learning_session_start", {
+        "event_type": "learning.session.start",
+        "actor": _actor(user, await _org_of(db_session, user)),
+        "course_id": str(UUID(course.course_uuid.removeprefix("course_"))),
+        "payload": {"course_revision": state.revision, "mode": payload.mode, "blueprint": blueprint},
+    }, write=True)
+
+
+async def _org_of(db_session: AsyncSession, user: PublicUser) -> int:
+    """The person's organisation, from the server; never taken from the browser."""
+    org_id = (
+        await db_session.execute(
+            select(UserOrganization.org_id).where(UserOrganization.user_id == user.id).order_by(UserOrganization.id)
+        )
+    ).scalars().first()
+    if org_id is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="no organisation")
+    return int(org_id)
+
+
+@router.get("/practice/sessions/{session_id}")
+async def current_task(
+    session_id: UUID,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    user = _person(current_user)
+    org_id = await _org_of(db_session, user)
+    return await _call("learning_task_next", {
+        "event_type": "learning.task.next", "actor": _actor(user, org_id), "session_id": str(session_id), "payload": {},
+    })
+
+
+@router.post("/practice/sessions/{session_id}/answer")
+async def answer(
+    session_id: UUID,
+    payload: AnswerWrite,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    user = _person(current_user)
+    org_id = await _org_of(db_session, user)
+    return await _call("learning_task_answer", {
+        "event_type": "learning.task.answer", "actor": _actor(user, org_id), "session_id": str(session_id),
+        "expected_revision": payload.revision, "payload": {"answer": payload.answer},
+    }, write=True)
+
+
+@router.post("/practice/sessions/{session_id}/hint")
+async def hint(
+    session_id: UUID,
+    payload: HintRequest,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    user = _person(current_user)
+    org_id = await _org_of(db_session, user)
+    return await _call("learning_hint_request", {
+        "event_type": "learning.hint.request", "actor": _actor(user, org_id), "session_id": str(session_id),
+        "payload": {"task_id": payload.task_id},
+    })
+
+
+@router.post("/practice/sessions/{session_id}/tutor")
+async def tutor(
+    session_id: UUID,
+    course_id: str,
+    payload: TutorQuestion,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    user = _person(current_user)
+    org_id = await _org_of(db_session, user)
+    return await _call("learning_tutor_ask", {
+        "event_type": "learning.tutor.ask", "actor": _actor(user, org_id), "session_id": str(session_id),
+        "course_id": str(UUID(course_id.removeprefix("course_"))), "payload": {"question": payload.question},
+    })
