@@ -220,3 +220,46 @@ async def test_factory_draft_rejects_stale_replacement_and_published_course(
     assert stale.status_code == 409
     assert after_publish.status_code == 409
     assert after_publish.json()["detail"] == "published_course_is_immutable"
+
+
+@pytest.mark.asyncio
+async def test_sequence_players_are_embedded_idempotently_into_a_lesson(db, monkeypatch) -> None:
+    _enable_local_mode(monkeypatch)
+    player = "http://127.0.0.1:8090/lernsequenz/praes-x-kurs?k=" + "a" * 40
+    async with _mounted_learning_client(db) as client:
+        created = await client.post(
+            "/api/v1/learning/courses",
+            headers={SERVICE_HEADER: SERVICE_KEY},
+            json={"title": "Embed target", "description": "", "about": ""},
+        )
+        course = created.json()["course"]
+        draft = _draft(str(uuid4()), course["course_id"])
+        await client.put(
+            f"/api/v1/learning/courses/{course['course_id']}/factory-draft",
+            headers={SERVICE_HEADER: SERVICE_KEY},
+            json={"expected_revision": 1, "draft_hash": _draft_hash(draft), "draft": draft},
+        )
+        url = f"/api/v1/learning/courses/{course['course_id']}/lernsequenz-einbettungen"
+        body = {"lesson_id": "lesson-authority", "embeds": [{"heading": "Interaktive Präsentation", "url": player}]}
+        first = await client.put(url, headers={SERVICE_HEADER: SERVICE_KEY}, json=body)
+        again = await client.put(url, headers={SERVICE_HEADER: SERVICE_KEY}, json=body)
+        foreign = await client.put(
+            url, headers={SERVICE_HEADER: SERVICE_KEY},
+            json={"lesson_id": "lesson-authority", "embeds": [{"heading": "x", "url": "https://evil.example/x"}]},
+        )
+        missing = await client.put(
+            url, headers={SERVICE_HEADER: SERVICE_KEY}, json={**body, "lesson_id": "nope"}
+        )
+        unauthenticated = await client.put(url, json=body)
+
+    assert first.status_code == again.status_code == 200
+    assert foreign.status_code == 422 and missing.status_code == 404
+    assert unauthenticated.status_code in (401, 403)
+    lesson = next(
+        a for a in (await db.execute(select(Activity))).scalars().all()
+        if a.extra_metadata["learning_kind"] == "lesson"
+    )
+    await db.refresh(lesson)
+    embeds = [b for b in lesson.content["content"] if b["type"] == "blockEmbed"]
+    assert len(embeds) == 1 and embeds[0]["attrs"]["embedUrl"] == player
+    assert lesson.content["content"][0]["type"] != "blockEmbed"  # the lesson text stays first

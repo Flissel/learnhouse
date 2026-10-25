@@ -33,6 +33,7 @@ from src.db.resource_authors import (
 from src.db.users import PublicUser
 from src.security.rbac import AccessAction, check_resource_access
 from src.services.courses.courses import create_course, get_course
+from src.services.learning.einbettung import SequenceEmbedWrite, embed_sequences
 from src.services.learning.factory_draft import (
     FactoryDraftRead,
     FactoryDraftWrite,
@@ -537,6 +538,23 @@ async def get_factory_draft(
     await _authorize_course(request, db_session, owner, course, AccessAction.READ)
     state = await _state_for_course(db_session, course)
     return FactoryDraftEnvelope(draft=factory_draft_readback(state))
+
+
+@router.put(
+    "/courses/{course_id}/lernsequenz-einbettungen",
+    dependencies=[Depends(require_local_learning_service)],
+)
+async def put_sequence_embeds(
+    course_id: str,
+    payload: SequenceEmbedWrite,
+    request: Request,
+    db_session: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Learning's sequence players in a factory lesson; also for published courses."""
+    owner, _ = await _local_owner(db_session)
+    course = await _course_by_public_id(db_session, course_id)
+    await _authorize_course(request, db_session, owner, course, AccessAction.UPDATE)
+    return await embed_sequences(db_session, course, payload)
 
 
 @router.post(
