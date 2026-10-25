@@ -151,8 +151,17 @@ const deriveAPIUrl = (): string => {
   return `${backendUrl}/api/v1/`
 }
 
+const deriveServerAPIUrl = (): string => {
+  const internalUrl = process.env.LEARNHOUSE_INTERNAL_API_URL?.trim()
+  if (!internalUrl) return deriveAPIUrl()
+  return `${internalUrl.replace(/\/+$/, '')}/`
+}
+
 // For direct usage, these call the getters
 export const getAPIUrl = () => {
+  if (typeof window === 'undefined') {
+    return deriveServerAPIUrl()
+  }
   // On custom domains (client-side), use relative path to go through Next.js proxy
   // This ensures cookies work correctly (same-origin)
   if (isOnCustomDomain()) {
@@ -164,7 +173,7 @@ export const getAPIUrl = () => {
 // Server-side only - always returns full URL (never relative path)
 // Use this in Server Components, API routes, and server-side data fetching
 export const getServerAPIUrl = () => {
-  return deriveAPIUrl()
+  return deriveServerAPIUrl()
 }
 
 export const getBackendUrl = () => getLEARNHOUSE_BACKEND_URL()

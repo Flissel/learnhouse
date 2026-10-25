@@ -13,6 +13,7 @@ from src.routers import dev, trail, users, auth, orgs, roles, search
 from src.routers import mfa as mfa_router_module
 from src.routers import monitoring
 from src.routers import nudges as nudges_router_module
+from src.routers.learning import mount_local_learning_bootstrap
 from src.routers import stream
 from src.routers import api_tokens
 from src.routers import webhooks
@@ -89,6 +90,7 @@ v1_router.include_router(
     ],
 )
 v1_router.include_router(auth.router, prefix="/auth", tags=["auth"])
+mount_local_learning_bootstrap(v1_router)
 # Two-factor: enrollment/management plus the /auth/login/mfa challenge.
 v1_router.include_router(mfa_router_module.router, prefix="/auth", tags=["auth"])
 v1_router.include_router(

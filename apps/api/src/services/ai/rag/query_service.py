@@ -9,8 +9,11 @@ import logging
 from typing import AsyncGenerator, Optional
 
 from sqlalchemy import text
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from src.core.learning_mode import is_local_learning_mode_enabled
+from src.db.courses.courses import Course
 from src.services.ai.rag.embedding_service import embed_single_text
 from src.services.ai.base import ask_ai_stream
 from src.services.ai.llm import model_for_tier
@@ -18,6 +21,63 @@ from src.services.ai.llm import model_for_tier
 logger = logging.getLogger(__name__)
 
 TOP_K = 5
+
+
+def _canonical_course_id(course_uuid: str) -> str:
+    prefix = "course_"
+    return course_uuid[len(prefix):] if course_uuid.startswith(prefix) else course_uuid
+
+
+async def _query_learning_runtime(
+    question: str,
+    org_id: int,
+    course_id: int | None,
+    db_session: AsyncSession,
+    top_k: int,
+) -> dict:
+    if course_id is None:
+        return {"context": "", "sources": []}
+
+    course_uuid = (
+        await db_session.execute(
+            select(Course.course_uuid).where(
+                Course.id == course_id,
+                Course.org_id == org_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if course_uuid is None:
+        return {"context": "", "sources": []}
+
+    from src.services.ai.rag.qdrant_retriever import get_qdrant_retriever
+
+    chunks = await get_qdrant_retriever().retrieve(
+        question,
+        course_id=_canonical_course_id(course_uuid),
+        limit=top_k,
+    )
+    context_parts: list[str] = []
+    sources: list[dict] = []
+    source_numbers: dict[tuple[str, int], int] = {}
+    for chunk in chunks:
+        source_key = (chunk.source_id, chunk.source_revision)
+        if source_key not in source_numbers:
+            source_numbers[source_key] = len(sources) + 1
+            sources.append(
+                {
+                    "source_id": chunk.source_id,
+                    "source_revision": chunk.source_revision,
+                    "course_uuid": chunk.course_id,
+                    "locator": chunk.locator,
+                    "metadata": chunk.metadata,
+                    "content_hash": chunk.content_hash,
+                    "score": chunk.score,
+                }
+            )
+        context_parts.append(
+            f"[Source {source_numbers[source_key]}]\n{chunk.content}"
+        )
+    return {"context": "\n\n---\n\n".join(context_parts), "sources": sources}
 
 
 async def query_course_rag(
@@ -40,6 +100,11 @@ async def query_course_rag(
     Returns:
         {context: str, sources: list[dict]}
     """
+    if is_local_learning_mode_enabled():
+        return await _query_learning_runtime(
+            question, org_id, course_id, db_session, top_k
+        )
+
     # Embed the question
     query_embedding = await embed_single_text(question)
 

@@ -436,6 +436,11 @@ async def update_activity(
 
 async def _trigger_course_embedding(course_id: int, org_id: int) -> None:
     """Background task to re-index course embeddings after content update."""
+    from src.core.learning_mode import is_local_learning_mode_enabled
+
+    if is_local_learning_mode_enabled():
+        return
+
     try:
         from src.core.events.database import get_db_session
         from src.services.ai.rag.embedding_service import embed_course_content

@@ -14,6 +14,7 @@ from datetime import datetime
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from src.core.learning_mode import is_local_learning_mode_enabled
 from src.db.course_embeddings import CourseEmbedding
 from src.services.ai.llm.embeddings import (
     DEFAULT_EMBEDDING_DIMENSIONS,
@@ -98,6 +99,13 @@ async def embed_course_content(
 
     Returns the number of chunks indexed.
     """
+    if is_local_learning_mode_enabled():
+        logger.info(
+            "Skipping LearnHouse pgvector indexing in local Learning mode for course %d",
+            course_id,
+        )
+        return 0
+
     content_items = await extract_all_course_content(course_id, org_id, db_session)
     if not content_items:
         logger.info("No content to index for course %d", course_id)
