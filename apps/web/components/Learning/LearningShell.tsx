@@ -217,7 +217,10 @@ export default function LearningShell({ orgslug, courses, state }: LearningShell
           course={selectedCourse}
           state={state}
           visibleOnCompact={compactPanel === 'agent'}
-          onAsk={browserPractice && practice.state.turn ? (question) => { void practice.ask(question) } : undefined}
+          // While a feedback is shown the engine already holds the next task; the tutor would
+          // answer about that one, so it returns with the next task.
+          onAsk={browserPractice && practice.state.turn && !practice.state.pending
+            ? (question) => { void practice.ask(question) } : undefined}
           tutor={practice.state.tutor}
           busy={practice.state.busy}
         />
