@@ -56,6 +56,10 @@ class TutorQuestion(_Strict):
     question: Annotated[str, Field(min_length=1, max_length=2_000)]
 
 
+class CanvasOpen(_Strict):
+    activity_id: UUID
+
+
 def learner_id(user: PublicUser, org_id: int | None) -> str:
     """The person as Learning learner; same person, same id across sessions."""
     raw = f"lh-{org_id or 0}-{user.user_uuid}"
@@ -174,6 +178,28 @@ async def hint(
         "event_type": "learning.hint.request", "actor": _actor(user, org_id), "session_id": str(session_id),
         "payload": {"task_id": payload.task_id},
     })
+
+
+@router.post("/practice/sessions/{session_id}/canvas")
+async def open_canvas(
+    session_id: UUID,
+    payload: CanvasOpen,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> dict[str, str]:
+    """Open the drawing task; Learning answers with its signed drawing page for this person."""
+    user = _person(current_user)
+    actor = _actor(user, await _org_of(db_session, user))
+    # Same reference for the same task and person: reopening shows the same canvas.
+    ref = "lh-z-" + hashlib.sha256(f"{session_id}:{payload.activity_id}:{actor['actor_id']}".encode()).hexdigest()[:32]
+    opened = await _call("learning_canvas_open", {
+        "event_type": "learning.canvas.open", "actor": actor, "session_id": str(session_id),
+        "payload": {"activity_id": str(payload.activity_id), "session_ref": ref},
+    })
+    page_url = opened["result"].get("page_url")
+    if not isinstance(page_url, str) or not page_url.startswith(("https://", "http://")):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="drawing page unavailable")
+    return {"page_url": page_url}
 
 
 @router.post("/practice/sessions/{session_id}/tutor")

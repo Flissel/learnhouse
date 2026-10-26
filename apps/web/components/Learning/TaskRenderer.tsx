@@ -25,6 +25,8 @@ export interface OpenResponseTask extends TaskBase {
 export interface CanvasTask extends TaskBase {
   type: 'canvas'
   canvasHref?: string
+  // Learning's drawing page for this person, embedded once the task is opened.
+  canvasUrl?: string
 }
 
 export type LearningTask = MultipleChoiceTask | OpenResponseTask | CanvasTask
@@ -33,6 +35,7 @@ interface TaskRendererProps {
   task: LearningTask
   submitLabel: string
   onSubmit?: (_answer: TaskAnswer) => void
+  onOpenCanvas?: () => void
   disabled?: boolean
 }
 
@@ -44,7 +47,7 @@ export function answerFromForm(task: LearningTask, form: FormData): TaskAnswer {
   return { text: String(form.get('answer') ?? '') }
 }
 
-export default function TaskRenderer({ task, submitLabel, onSubmit, disabled }: TaskRendererProps) {
+export default function TaskRenderer({ task, submitLabel, onSubmit, onOpenCanvas, disabled }: TaskRendererProps) {
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     onSubmit?.(answerFromForm(task, new FormData(event.currentTarget)))
@@ -72,6 +75,26 @@ export default function TaskRenderer({ task, submitLabel, onSubmit, disabled }: 
               </label>
             ))}
           </fieldset>
+        ) : task.type === 'canvas' && task.canvasUrl ? (
+          <iframe
+            className="h-[780px] w-full rounded-md border border-zinc-300 bg-white"
+            id="answer"
+            src={task.canvasUrl}
+            title="Zeichenfläche"
+          />
+        ) : task.type === 'canvas' && onOpenCanvas ? (
+          <div className="border-s-4 border-cyan-600 bg-cyan-50 px-4 py-4">
+            <p className="text-sm text-zinc-700">Zeichne deine Lösung auf der Zeichenfläche; du gibst sie dort selbst ab.</p>
+            <button
+              className="mt-3 inline-flex h-10 items-center rounded-md bg-cyan-800 px-4 text-sm font-semibold text-white hover:bg-cyan-900 disabled:opacity-50"
+              disabled={disabled}
+              id="answer"
+              onClick={onOpenCanvas}
+              type="button"
+            >
+              Zeichenfläche öffnen
+            </button>
+          </div>
         ) : task.type === 'canvas' ? (
           <div className="border-s-4 border-cyan-600 bg-cyan-50 px-4 py-4">
             <p className="text-sm text-zinc-700">Diese Zeichenaufgabe öffnest du über den Lern-Agenten; dort zeichnest du und gibst selbst ab.</p>
@@ -96,13 +119,15 @@ export default function TaskRenderer({ task, submitLabel, onSubmit, disabled }: 
         )}
       </div>
 
-      <button
-        className="mt-5 inline-flex h-10 items-center justify-center rounded-md bg-zinc-950 px-5 text-sm font-semibold text-white hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
-        disabled={!onSubmit || disabled || task.type === 'canvas'}
-        type="submit"
-      >
-        {submitLabel}
-      </button>
+      {task.type === 'canvas' ? null : (
+        <button
+          className="mt-5 inline-flex h-10 items-center justify-center rounded-md bg-zinc-950 px-5 text-sm font-semibold text-white hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={!onSubmit || disabled}
+          type="submit"
+        >
+          {submitLabel}
+        </button>
+      )}
 
       <section aria-labelledby="task-evidence-title" className="mt-7 border-t border-zinc-200 pt-5">
         <h4 className="mb-3 text-xs font-semibold uppercase text-zinc-500" id="task-evidence-title">

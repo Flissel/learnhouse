@@ -9,6 +9,11 @@ const FEEDBACK: Record<string, { state: 'correct' | 'incorrect' | 'needs_review'
   needs_review: { state: 'needs_review', message: 'Deine Antwort wird von einer Person geprüft; danach zählt sie für deinen Lernstand.' },
 }
 
+const CANVAS_SUBMITTED = {
+  state: 'submitted' as const,
+  message: 'Deine Zeichnung ist abgegeben. Das Ergebnis steht in der Zeichenfläche; ist die KI unsicher, prüft es noch eine Person.',
+}
+
 export function practiceTask(task: PracticeTask): LearningTask {
   const evidence = task.source_refs.map((ref, index) => {
     const { title, locator } = evidenceTitle(ref)
@@ -26,18 +31,28 @@ export function practiceTask(task: PracticeTask): LearningTask {
 /** The engine's turn as the Learning Player shows it. */
 export function practiceModel(
   turn: PracticeTurn | null,
-  extra: { mode: 'training' | 'exam'; hint?: string; busy?: boolean; error?: string },
+  extra: {
+    mode: 'training' | 'exam'
+    hint?: string
+    busy?: boolean
+    error?: string
+    canvas?: { taskId: string; url: string; submitted: boolean }
+  },
 ): LearningPlayerModel {
   if (!turn) {
     return { mode: extra.mode, sessionProgress: { completed: 0, total: 0 }, task: null, busy: extra.busy, error: extra.error }
   }
-  const feedback = turn.feedback ? FEEDBACK[turn.feedback.state] : undefined
+  const canvas = extra.canvas && turn.task?.id === extra.canvas.taskId ? extra.canvas : undefined
+  const feedback = canvas?.submitted
+    ? CANVAS_SUBMITTED
+    : turn.feedback ? FEEDBACK[turn.feedback.state] : undefined
   const done = turn.state !== 'active' && turn.summary
+  const task = turn.task ? practiceTask(turn.task) : null
   return {
     mode: turn.mode,
     sessionProgress: { completed: turn.progress.completed, total: turn.progress.total },
-    task: turn.task ? practiceTask(turn.task) : null,
-    feedback: feedback && turn.feedback?.mastery_applied
+    task: task?.type === 'canvas' && canvas ? { ...task, canvasUrl: canvas.url } : task,
+    feedback: feedback && turn.feedback?.mastery_applied && !canvas?.submitted
       ? { ...feedback, message: `${feedback.message} Dein Lernstand ist aktualisiert.` }
       : feedback,
     hint: extra.hint,

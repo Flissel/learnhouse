@@ -79,3 +79,33 @@ async def test_practice_is_per_person_and_forwards_to_the_engine(db, monkeypatch
     assert calls[1][0] == "learning_task_answer" and calls[1][1]["expected_revision"] == 3
     # A query parameter cannot change the learner: the organisation comes from the server.
     assert calls[2][1]["actor"]["actor_id"] == expected_actor
+
+
+@pytest.mark.asyncio
+async def test_canvas_open_gives_the_drawing_page_of_this_person(db, monkeypatch) -> None:
+    _enable_local_mode(monkeypatch)
+    calls = []
+
+    async def fake_call(tool, event, *, write=False, fresh=False):
+        calls.append((tool, event))
+        return {"state": "completed", "result": {"page_url": "http://100.67.177.45:8090/zeichnen/t.s"}, "evidence": None}
+
+    monkeypatch.setattr(practice, "_call", fake_call)
+    async with _mounted_learning_client(db) as service:
+        await service.post("/api/v1/learning/courses", headers={SERVICE_HEADER: SERVICE_KEY},
+                           json={"title": "Canvas target", "description": "", "about": ""})
+    owner = (await db.execute(select(User))).scalars().first()
+    person = PublicUser.model_validate(owner, from_attributes=True)
+    session_id, activity_id = str(uuid4()), str(uuid4())
+    async with _practice_client(db, person) as client:
+        first = await client.post(f"/api/v1/learning/practice/sessions/{session_id}/canvas",
+                                  json={"activity_id": activity_id})
+        again = await client.post(f"/api/v1/learning/practice/sessions/{session_id}/canvas",
+                                  json={"activity_id": activity_id})
+    assert first.status_code == 200 and first.json() == {"page_url": "http://100.67.177.45:8090/zeichnen/t.s"}
+    tool, event = calls[0]
+    assert tool == "learning_canvas_open" and event["payload"]["activity_id"] == activity_id
+    assert event["actor"]["actor_id"].endswith(str(owner.user_uuid))
+    # Reopening the same task keeps the same canvas reference.
+    assert calls[1][1]["payload"]["session_ref"] == event["payload"]["session_ref"]
+    assert again.status_code == 200

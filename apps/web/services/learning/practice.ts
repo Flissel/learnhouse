@@ -48,7 +48,7 @@ export interface PracticeReply {
 
 export type PracticeAnswer = { choice_id: string } | { choice_ids: string[] } | { text: string }
 
-async function call(path: string, method: 'GET' | 'POST', token: string | undefined, body?: unknown): Promise<PracticeReply> {
+async function call<T = PracticeReply>(path: string, method: 'GET' | 'POST', token: string | undefined, body?: unknown): Promise<T> {
   const response = await secureFetch(
     `${getAPIUrl()}learning/practice/${path}`,
     RequestBodyWithAuthHeader(method, body ?? null, null, token),
@@ -58,7 +58,7 @@ async function call(path: string, method: 'GET' | 'POST', token: string | undefi
     const detail = typeof data?.detail === 'string' ? data.detail : 'Die Übung ist gerade nicht erreichbar.'
     throw new Error(detail)
   }
-  return data as PracticeReply
+  return data as T
 }
 
 export const startPractice = (courseId: string, mode: 'training' | 'exam', token?: string) =>
@@ -75,6 +75,13 @@ export const hintPractice = (sessionId: string, taskId: string, token?: string) 
 
 export const askPracticeTutor = (sessionId: string, courseId: string, question: string, token?: string) =>
   call(`sessions/${encodeURIComponent(sessionId)}/tutor?course_id=${encodeURIComponent(courseId)}`, 'POST', token, { question })
+
+/** The signed drawing page of this person for a canvas task (served by Learning). */
+export const openPracticeCanvas = (sessionId: string, activityId: string, token?: string) =>
+  call<{ page_url: string }>(`sessions/${encodeURIComponent(sessionId)}/canvas`, 'POST', token, { activity_id: activityId })
+
+/** The drawing page tells the player that the drawing was submitted. */
+export const CANVAS_SUBMITTED_MESSAGE = 'learning-zeichnung-abgegeben'
 
 /** A hint arrives as text or as an object with a text field; show only text. */
 export function hintText(value: unknown): string | undefined {

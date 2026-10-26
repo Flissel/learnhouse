@@ -192,12 +192,14 @@ export default function LearningShell({ orgslug, courses, state }: LearningShell
               courseHref={courseHref}
               model={practiceModel(practice.state.turn, {
                 mode: playerMode, hint: practice.state.hint, busy: practice.state.busy, error: practice.state.error,
+                canvas: practice.state.canvas,
               })}
               onModeChange={setPlayerMode}
               onStartSession={practice.signedIn ? () => { void practice.start(playerMode) } : undefined}
               onSubmit={(answer) => { void practice.submit(answer) }}
               onHint={() => { void practice.hint() }}
               onNext={() => { void practice.next() }}
+              onOpenCanvas={() => { void practice.openCanvas() }}
             />
           ) : selectedCourse ? (
             <LearningPlayer

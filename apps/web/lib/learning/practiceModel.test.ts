@@ -31,6 +31,19 @@ describe('practiceModel', () => {
     expect(review.feedback?.state).toBe('needs_review')
   })
 
+  test('embeds the drawing page of the open canvas task and says when it was submitted', () => {
+    const canvasTurn = turn({ task: { id: 'c1', type: 'penecho_canvas', prompt: 'Zeichne', options: [], source_refs: [] } })
+    expect((practiceModel(canvasTurn, { mode: 'training' }).task as any).canvasUrl).toBeUndefined()
+    const url = 'http://100.67.177.45:8090/zeichnen/t.s'
+    const open = practiceModel(canvasTurn, { mode: 'training', canvas: { taskId: 'c1', url, submitted: false } })
+    expect((open.task as any).canvasUrl).toBe(url)
+    expect(open.feedback).toBeUndefined()
+    const done = practiceModel(canvasTurn, { mode: 'training', canvas: { taskId: 'c1', url, submitted: true } })
+    expect(done.feedback?.state).toBe('submitted')
+    // A link of another task is never shown.
+    expect((practiceModel(canvasTurn, { mode: 'training', canvas: { taskId: 'x', url, submitted: false } }).task as any).canvasUrl).toBeUndefined()
+  })
+
   test('shows a summary when the session is completed and nothing without a session', () => {
     const done = practiceModel(turn({ state: 'completed', task: null, summary: { attempted: 4, correct: 3, score: 0.75 } }), { mode: 'training' })
     expect(done.summary).toEqual({ attempted: 4, correct: 3, score: 0.75 })

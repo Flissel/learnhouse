@@ -10,7 +10,7 @@ export interface LearningPlayerModel {
   sessionProgress: { completed: number; total: number }
   task: LearningTask | null
   feedback?: {
-    state: 'correct' | 'incorrect' | 'needs_review'
+    state: 'correct' | 'incorrect' | 'needs_review' | 'submitted'
     message: string
     misconception?: string
   }
@@ -29,6 +29,7 @@ interface LearningPlayerProps {
   onSubmit?: (_answer: TaskAnswer) => void
   onHint?: () => void
   onNext?: () => void
+  onOpenCanvas?: () => void
   onStartSession?: () => void
   startHint?: string
 }
@@ -49,6 +50,7 @@ export default function LearningPlayer({
   onSubmit,
   onHint,
   onNext,
+  onOpenCanvas,
   onStartSession,
   startHint,
 }: LearningPlayerProps) {
@@ -120,6 +122,7 @@ export default function LearningPlayer({
           <TaskRenderer
             disabled={model.busy || (isTraining && answered)}
             key={model.task.id}
+            onOpenCanvas={onOpenCanvas}
             onSubmit={onSubmit}
             submitLabel={isTraining ? 'Antwort prüfen' : 'Antwort abgeben'}
             task={model.task}
