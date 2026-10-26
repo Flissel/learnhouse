@@ -198,12 +198,9 @@ async def _provision_locked(
 ) -> LocalLearningProvisioning:
     await install_default_elements(db_session)
 
+    # The organisation is ours by its slug; its name and description are the operator's to
+    # brand (a renamed organisation broke every Learning service call with 409 before).
     organization = await _get_organization(db_session)
-    if organization is not None and organization.name != LOCAL_LEARNING_ORG_NAME:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Local learning organization conflicts with existing data",
-        )
 
     stored_owner = await _get_owner(db_session)
     if stored_owner is not None and not stored_owner.is_superadmin:
@@ -256,7 +253,9 @@ async def _provision_locked(
         owner.id,
         int(organization.id or 0),
     )
-    await _ensure_locale(db_session, organization)
+    if created:
+        # Only the first provisioning sets the language; later the admin chooses it.
+        await _ensure_locale(db_session, organization)
 
     return LocalLearningProvisioning(
         created=created,

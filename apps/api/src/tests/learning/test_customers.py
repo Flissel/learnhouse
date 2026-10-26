@@ -53,3 +53,31 @@ async def test_a_customer_is_a_usergroup_with_private_courses_and_an_invite(db, 
     link = (await db.execute(select(UserGroupResource).where(UserGroupResource.usergroup_id == group.id))).scalars().one()
     assert link.resource_uuid == course.course_uuid
     assert listed.json() == [{**body, "invite_code": None, "signup_path": None}]
+
+
+@pytest.mark.asyncio
+async def test_a_renamed_german_organisation_keeps_working_and_keeps_its_brand(db, monkeypatch) -> None:
+    from copy import deepcopy
+
+    from src.db.organization_config import OrganizationConfig
+    from src.db.organizations import Organization
+
+    _enable_local_mode(monkeypatch)
+    headers = {SERVICE_HEADER: SERVICE_KEY}
+    async with _mounted_learning_client(db) as service:
+        assert (await service.get("/api/v1/learning/courses", headers=headers)).status_code == 200
+        org = (await db.execute(select(Organization))).scalars().one()
+        org.name = "VibeMind Academy"
+        config = (await db.execute(select(OrganizationConfig))).scalars().one()
+        changed = deepcopy(config.config)
+        changed["customization"]["general"]["default_language"] = "de"
+        config.config = changed
+        db.add_all([org, config])
+        await db.commit()
+        again = await service.get("/api/v1/learning/courses", headers=headers)
+
+    assert again.status_code == 200, again.text
+    await db.refresh(org)
+    await db.refresh(config)
+    assert org.name == "VibeMind Academy"
+    assert config.config["customization"]["general"]["default_language"] == "de"
