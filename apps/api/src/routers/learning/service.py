@@ -34,6 +34,7 @@ from src.db.users import PublicUser
 from src.security.rbac import AccessAction, check_resource_access
 from src.services.courses.courses import create_course, get_course
 from src.services.learning.einbettung import SequenceEmbedWrite, embed_sequences
+from src.services.learning.kunden import CustomerCreate, CustomerRead, create_customer, list_customers
 from src.services.learning.factory_draft import (
     FactoryDraftRead,
     FactoryDraftWrite,
@@ -664,3 +665,31 @@ async def show_progress(
             revision=state.revision,
         )
     )
+
+
+@router.post(
+    "/customers",
+    response_model=CustomerRead,
+    dependencies=[Depends(require_local_learning_service)],
+)
+async def post_customer(
+    payload: CustomerCreate,
+    request: Request,
+    db_session: AsyncSession = Depends(get_db_session),
+) -> CustomerRead:
+    """A customer: usergroup with its private courses and an invite code into the group."""
+    owner, org_id = await _local_owner(db_session)
+    courses = [await _course_by_public_id(db_session, course_id) for course_id in payload.course_ids]
+    for course in courses:
+        await _authorize_course(request, db_session, owner, course, AccessAction.UPDATE)
+    return await create_customer(request, db_session, owner, org_id, payload.name.strip(), courses)
+
+
+@router.get(
+    "/customers",
+    response_model=list[CustomerRead],
+    dependencies=[Depends(require_local_learning_service)],
+)
+async def get_customers(db_session: AsyncSession = Depends(get_db_session)) -> list[CustomerRead]:
+    _, org_id = await _local_owner(db_session)
+    return await list_customers(db_session, org_id)
