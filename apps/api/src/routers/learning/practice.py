@@ -13,6 +13,7 @@ import json
 import os
 import re
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 import httpx
@@ -154,14 +155,20 @@ async def current_task(
 async def player_token_for_embed(
     current_user: PublicUser = Depends(get_current_user),
     db_session: AsyncSession = Depends(get_db_session),
-) -> dict[str, str]:
+) -> dict[str, str | None]:
     """A short-lived signed token the embedded sequence player sends to learning-api, so
     answers and notes there count for this person (learning-api verifies it with the
     shared service key)."""
     from src.services.learning.person_token import person_token
 
     user = _person(current_user)
-    return {"token": person_token(learner_id(user, await _org_of(db_session, user)))}
+    return {"token": person_token(learner_id(user, await _org_of(db_session, user))), "origin": _player_origin()}
+
+
+def _player_origin() -> str | None:
+    """The one origin the web may hand the person token to; nothing when not configured."""
+    parts = urlsplit(os.environ.get("LEARNHOUSE_LEARNING_PLAYER_ORIGIN", "").strip())
+    return f"{parts.scheme}://{parts.netloc}" if parts.scheme in ("http", "https") and parts.netloc else None
 
 
 @router.post("/practice/sessions/{session_id}/answer")

@@ -116,6 +116,7 @@ async def test_player_token_is_signed_for_the_person(db, monkeypatch) -> None:
     from src.services.learning.person_token import read_person_token
 
     _enable_local_mode(monkeypatch)
+    monkeypatch.setenv("LEARNHOUSE_LEARNING_PLAYER_ORIGIN", "http://100.67.177.45:8090/")
     async with _mounted_learning_client(db) as service:
         await service.post("/api/v1/learning/courses", headers={SERVICE_HEADER: SERVICE_KEY},
                            json={"title": "Token target", "description": "", "about": ""})
@@ -130,3 +131,9 @@ async def test_player_token_is_signed_for_the_person(db, monkeypatch) -> None:
     assert issued.status_code == 200 and refused.status_code == 401
     # Verifiable with the shared service key only; the payload names exactly this person.
     assert read_person_token(issued.json()["token"], key=SERVICE_KEY) == f"lh-{org_id}-{owner.user_uuid}"
+    # The web attaches the token only to players on this origin (never to a look-alike embed).
+    assert issued.json()["origin"] == "http://100.67.177.45:8090"
+    monkeypatch.delenv("LEARNHOUSE_LEARNING_PLAYER_ORIGIN")
+    async with _practice_client(db, person) as client:
+        unconfigured = await client.get("/api/v1/learning/practice/player-token")
+    assert unconfigured.status_code == 200 and unconfigured.json()["origin"] is None

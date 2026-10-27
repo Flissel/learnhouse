@@ -81,24 +81,31 @@ export const openPracticeCanvas = (sessionId: string, activityId: string, token?
   call<{ page_url: string }>(`sessions/${encodeURIComponent(sessionId)}/canvas`, 'POST', token, { activity_id: activityId })
 
 /** The drawing page tells the player that the drawing was submitted. */
-export const playerToken = (token?: string) => call<{ token: string }>('player-token', 'GET', token)
+export interface PlayerPerson {
+  token: string
+  /** The only origin the token may be attached to (the learning-api player); null = attach nowhere. */
+  origin: string | null
+}
+
+export const playerToken = (token?: string) => call<PlayerPerson>('player-token', 'GET', token)
 
 // One person token per page: every sequence player embedded on a lesson page shares it;
 // when the backend refuses, the players are embedded without one (answers then count for
 // the shared learner, as before).
-let personTokenRequest: Promise<string> | null = null
-let personTokenFor: string | undefined
-export function playerTokenOnce(token?: string): Promise<string> {
-  if (!personTokenRequest || personTokenFor !== token) {
-    personTokenFor = token
-    personTokenRequest = playerToken(token)
-      .then((reply) => reply.token)
+const NOBODY: PlayerPerson = { token: '', origin: null }
+let personRequest: Promise<PlayerPerson> | null = null
+let personRequestFor: string | undefined
+export function playerTokenOnce(token?: string): Promise<PlayerPerson> {
+  if (!personRequest || personRequestFor !== token) {
+    personRequestFor = token
+    personRequest = playerToken(token)
+      .then((reply) => ({ token: reply.token, origin: reply.origin ?? null }))
       .catch(() => {
-        personTokenRequest = null
-        return ''
+        personRequest = null
+        return NOBODY
       })
   }
-  return personTokenRequest
+  return personRequest
 }
 
 export const CANVAS_SUBMITTED_MESSAGE = 'learning-zeichnung-abgegeben'
