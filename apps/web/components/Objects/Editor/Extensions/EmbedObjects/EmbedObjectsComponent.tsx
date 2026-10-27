@@ -6,6 +6,9 @@ import { SiGithub, SiReplit, SiSpotify, SiLoom, SiGooglemaps, SiNotion, SiGoogle
 import DOMPurify from 'dompurify'
 import { cn } from '@/lib/utils'
 import { useTranslation } from 'react-i18next'
+import { useLHSession } from '@components/Contexts/LHSessionContext'
+import { playerTokenOnce } from '@services/learning/practice'
+import { isSequencePlayer, withPersonToken } from '@/lib/learning/embedLink'
 
 // Matches the embedHeight default in the EmbedObjects node
 const DEFAULT_EMBED_HEIGHT = 300;
@@ -49,10 +52,11 @@ const getYouTubeEmbedUrl = (url: string): string => {
 };
 
 // Memoized component for the embed content
-const MemoizedEmbed = React.memo(({ embedUrl, sanitizedEmbedCode, embedType }: {
+const MemoizedEmbed = React.memo(({ embedUrl, sanitizedEmbedCode, embedType, personToken }: {
   embedUrl: string;
   sanitizedEmbedCode: string;
   embedType: 'url' | 'code';
+  personToken?: string;
 }) => {
   useEffect(() => {
     if (embedType === 'code' && sanitizedEmbedCode) {
@@ -88,7 +92,7 @@ const MemoizedEmbed = React.memo(({ embedUrl, sanitizedEmbedCode, embedType }: {
       isYoutubeUrl = false;
     }
 
-    const processedUrl = isYoutubeUrl ? getYouTubeEmbedUrl(embedUrl) : embedUrl;
+    const processedUrl = isYoutubeUrl ? getYouTubeEmbedUrl(embedUrl) : withPersonToken(embedUrl, personToken || '');
 
     return (
       <iframe
@@ -123,6 +127,17 @@ function EmbedObjectsComponent(props: any) {
   const resizeRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const editorState = useEditorProvider() as any
+
+  // The signed-in person travels into the sequence player: what they answer there counts for them.
+  const session = useLHSession() as any
+  const accessToken = session?.data?.tokens?.access_token as string | undefined
+  const [personToken, setPersonToken] = useState<string | null>(null)
+  useEffect(() => {
+    if (embedType !== 'url' || !isSequencePlayer(embedUrl)) { setPersonToken(''); return }
+    let active = true
+    playerTokenOnce(accessToken).then((value) => { if (active) setPersonToken(value) })
+    return () => { active = false }
+  }, [embedType, embedUrl, accessToken])
   const isEditable = editorState.isEditable
 
   // Only track the breakpoint here. Sizing itself is handled in CSS
@@ -333,17 +348,20 @@ function EmbedObjectsComponent(props: any) {
     return styles;
   };
 
+  // A sequence player waits for the person token (null = still fetching), so it loads once.
+  const waitingForPerson = embedType === 'url' && isSequencePlayer(embedUrl) && personToken === null
   const embedContent = useMemo(() => (
-    !isResizing && (embedUrl || sanitizedEmbedCode) ? (
+    !isResizing && !waitingForPerson && (embedUrl || sanitizedEmbedCode) ? (
       <MemoizedEmbed
         embedUrl={embedUrl}
         sanitizedEmbedCode={sanitizedEmbedCode}
         embedType={embedType}
+        personToken={personToken || ''}
       />
     ) : (
       <div className="w-full h-full bg-neutral-100 rounded-lg" />
     )
-  ), [embedUrl, sanitizedEmbedCode, embedType, isResizing]);
+  ), [embedUrl, sanitizedEmbedCode, embedType, isResizing, waitingForPerson, personToken]);
 
   const [activeInput, setActiveInput] = useState<'none' | 'url' | 'code'>('none');
   const [selectedProduct, setSelectedProduct] = useState<typeof supportedProducts[0] | null>(null);

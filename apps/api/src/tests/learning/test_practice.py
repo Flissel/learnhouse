@@ -109,3 +109,24 @@ async def test_canvas_open_gives_the_drawing_page_of_this_person(db, monkeypatch
     # Reopening the same task keeps the same canvas reference.
     assert calls[1][1]["payload"]["session_ref"] == event["payload"]["session_ref"]
     assert again.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_player_token_is_signed_for_the_person(db, monkeypatch) -> None:
+    from src.services.learning.person_token import read_person_token
+
+    _enable_local_mode(monkeypatch)
+    async with _mounted_learning_client(db) as service:
+        await service.post("/api/v1/learning/courses", headers={SERVICE_HEADER: SERVICE_KEY},
+                           json={"title": "Token target", "description": "", "about": ""})
+    owner = (await db.execute(select(User))).scalars().first()
+    org_id = (await db.execute(select(UserOrganization.org_id).where(UserOrganization.user_id == owner.id))).scalars().first()
+    person = PublicUser.model_validate(owner, from_attributes=True)
+    async with _practice_client(db, person) as client:
+        issued = await client.get("/api/v1/learning/practice/player-token")
+    async with _practice_client(db, AnonymousUser()) as anonymous:
+        refused = await anonymous.get("/api/v1/learning/practice/player-token")
+
+    assert issued.status_code == 200 and refused.status_code == 401
+    # Verifiable with the shared service key only; the payload names exactly this person.
+    assert read_person_token(issued.json()["token"], key=SERVICE_KEY) == f"lh-{org_id}-{owner.user_uuid}"
