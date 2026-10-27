@@ -1,14 +1,15 @@
-import { BarChart3, BookOpenCheck, Library } from 'lucide-react'
+import { BarChart3, BookOpenCheck, Library, StickyNote } from 'lucide-react'
 
 interface SpaceRailProps {
   coursesHref: string
   learningHref: string
+  notesHref?: string
 }
 
 const railLink =
   'group flex h-14 w-14 flex-col items-center justify-center gap-1 rounded-md text-[10px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2'
 
-export default function SpaceRail({ coursesHref, learningHref }: SpaceRailProps) {
+export default function SpaceRail({ coursesHref, learningHref, notesHref }: SpaceRailProps) {
   return (
     <nav
       aria-label="VibeMind Spaces"
@@ -32,6 +33,16 @@ export default function SpaceRail({ coursesHref, learningHref }: SpaceRailProps)
         <Library aria-hidden="true" size={19} strokeWidth={2} />
         <span>Kurse</span>
       </a>
+      {notesHref ? (
+        <a
+          className={`${railLink} mt-2 text-zinc-400 hover:bg-zinc-800 hover:text-white`}
+          href={notesHref}
+          title="Notizen"
+        >
+          <StickyNote aria-hidden="true" size={19} strokeWidth={2} />
+          <span>Notizen</span>
+        </a>
+      ) : null}
       <div className="mt-auto flex h-14 w-14 flex-col items-center justify-center gap-1 text-[10px] text-zinc-500">
         <BarChart3 aria-hidden="true" size={18} />
         <span>Fortschritt</span>

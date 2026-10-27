@@ -86,6 +86,7 @@ export default function LearningShell({ orgslug, courses, state }: LearningShell
 
   const learningHref = getUriWithOrg(orgslug, '/learning')
   const coursesHref = getUriWithOrg(orgslug, '/courses')
+  const notesHref = getUriWithOrg(orgslug, '/learning/notizen')
   const courseHref = selectedCourse
     ? getUriWithOrg(orgslug, `/course/${selectedCourse.id.replace(/^course_/, '')}`)
     : null
@@ -143,7 +144,7 @@ export default function LearningShell({ orgslug, courses, state }: LearningShell
       </div>
 
       <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 lg:grid-cols-[4.5rem_minmax(13rem,17rem)_minmax(0,1fr)_minmax(16rem,20rem)]">
-        <SpaceRail coursesHref={coursesHref} learningHref={learningHref} />
+        <SpaceRail coursesHref={coursesHref} learningHref={learningHref} notesHref={notesHref} />
         <CourseOutline
           courses={courses}
           onSelect={selectCourse}

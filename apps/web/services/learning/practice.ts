@@ -48,7 +48,7 @@ export interface PracticeReply {
 
 export type PracticeAnswer = { choice_id: string } | { choice_ids: string[] } | { text: string }
 
-async function call<T = PracticeReply>(path: string, method: 'GET' | 'POST', token: string | undefined, body?: unknown): Promise<T> {
+async function call<T = PracticeReply>(path: string, method: 'GET' | 'POST' | 'PATCH', token: string | undefined, body?: unknown): Promise<T> {
   const response = await secureFetch(
     `${getAPIUrl()}learning/practice/${path}`,
     RequestBodyWithAuthHeader(method, body ?? null, null, token),
@@ -81,6 +81,25 @@ export const openPracticeCanvas = (sessionId: string, activityId: string, token?
   call<{ page_url: string }>(`sessions/${encodeURIComponent(sessionId)}/canvas`, 'POST', token, { activity_id: activityId })
 
 /** The drawing page tells the player that the drawing was submitted. */
+export interface NoteRead {
+  id: string
+  course_id: string
+  sequence_id: string
+  anchor: Record<string, unknown>
+  selection: string
+  explanation: string
+  /** What the tutor added from outside the course; always shown as such. */
+  extra: string
+  extra_sources: string[]
+  own_text: string
+  created_at: string
+  updated_at: string
+}
+
+export const listNotes = (token?: string) => call<{ notes: NoteRead[] }>('notes', 'GET', token)
+export const setNoteText = (noteId: string, ownText: string, token?: string) =>
+  call<NoteRead>(`notes/${encodeURIComponent(noteId)}`, 'PATCH', token, { own_text: ownText })
+
 export interface PlayerPerson {
   token: string
   /** The only origin the token may be attached to (the learning-api player); null = attach nowhere. */
