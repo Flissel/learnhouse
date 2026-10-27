@@ -1,7 +1,7 @@
 // @ts-expect-error Bun supplies this runtime module; the web tsconfig intentionally omits Bun globals.
 import { describe, expect, test } from 'bun:test'
 
-import { practiceModel } from './practiceModel'
+import { imageFallback, practiceModel } from './practiceModel'
 import type { PracticeTurn } from '@/services/learning/practice'
 
 const ref = JSON.stringify({ locator: { heading: 'Vor der Arbeit' }, content: 'Vor jedem Einsatz prüfen.' })
@@ -83,6 +83,18 @@ describe('practiceTask for hands-on items', () => {
     const model = practiceModel(turn({ task: { ...base, type: 'fill_in', presentation } }), { mode: 'training' })
     expect((model.task as any).image).toEqual({ src: presentation.image, width: 560, height: 96, rect: presentation.rect, more: presentation.more })
     expect((model.task as any).shell).toBe('powershell')
+  })
+
+  test('an image fill_in also keeps its text template for the fallback', () => {
+    // Final review: without it a missing picture left an empty input with no command.
+    const presentation = {
+      image: 'http://h/lernsequenz-medien/term-0123456789abcdef.png', width: 560, height: 96, shell: 'cmd',
+      rect: { x: 280, y: 54, w: 132, h: 22 }, template: 'curl -fsSL https://claude.ai/{{wert}} -o {{wert}}',
+    }
+    const model = practiceModel(turn({ task: { ...base, type: 'fill_in', presentation } }), { mode: 'training' })
+    expect((model.task as any).template).toBe('curl -fsSL https://claude.ai/{{wert}} -o {{wert}}')
+    expect(imageFallback((model.task as any))).toBe(false)
+    expect(imageFallback({ ...(model.task as any), image: undefined })).toBe(true)
   })
 
   test('a broken image presentation falls back to the text blank', () => {

@@ -128,7 +128,14 @@ const percent = (r: Box, image: Picture) => ({
   fontSize: `clamp(9px, ${((r.h / image.width) * 100 * 0.72).toFixed(3)}cqw, 18px)`,
 })
 
-function ImageFillInField({ image, shell }: { image: Picture & { rect: Box; more: Box[] }; shell?: string }) {
+/** The drawn window, or the text line when there is no picture or it fails to load. */
+function FillInTaskField({ task }: { task: FillInTask }) {
+  const [broken, setBroken] = useState(false)
+  if (task.image && !broken) return <ImageFillInField image={task.image} onBroken={() => setBroken(true)} shell={task.shell} />
+  return <FillInField shell={task.shell} template={task.template} />
+}
+
+function ImageFillInField({ image, shell, onBroken }: { image: Picture & { rect: Box; more: Box[] }; shell?: string; onBroken: () => void }) {
   const [value, setValue] = useState('')
   const name = shell ? SHELL_NAMES[shell] ?? shell : 'Terminal'
   return (
@@ -137,7 +144,7 @@ function ImageFillInField({ image, shell }: { image: Picture & { rect: Box; more
       style={{ aspectRatio: `${image.width} / ${image.height}`, containerType: 'inline-size' }}
     >
       {/* eslint-disable-next-line @next/next/no-img-element -- drawn window served by learning-api */}
-      <img alt={`Fenster von ${name}`} className="absolute inset-0 h-full w-full" height={image.height} src={image.src} width={image.width} />
+      <img alt={`Fenster von ${name}`} className="absolute inset-0 h-full w-full" height={image.height} onError={onBroken} src={image.src} width={image.width} />
       <input
         aria-label={`Lücke im Fenster von ${name}`}
         autoComplete="off"
@@ -249,7 +256,7 @@ export default function TaskRenderer({ task, submitLabel, onSubmit, onOpenCanvas
             ))}
           </div>
         ) : task.type === 'fill_in' ? (
-          task.image ? <ImageFillInField image={task.image} shell={task.shell} /> : <FillInField shell={task.shell} template={task.template} />
+          <FillInTaskField task={task} />
         ) : task.type === 'canvas' && task.canvasUrl ? (
           <iframe
             className="h-[780px] w-full rounded-md border border-zinc-300 bg-white"

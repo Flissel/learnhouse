@@ -44,6 +44,11 @@ export function practiceTask(task: PracticeTask): LearningTask {
   return { ...base, type: 'open_response' }
 }
 
+/** Whether a fill_in shows the text line instead of a drawn window (no usable picture). */
+export function imageFallback(task: { image?: unknown }): boolean {
+  return !task.image
+}
+
 function pairItems(value: unknown): Array<{ id: string; label: string; image?: Picture }> {
   if (!Array.isArray(value)) return []
   return value
