@@ -177,3 +177,32 @@ async def test_notes_are_proxied_for_the_signed_in_person_only(db, monkeypatch) 
     assert headers["x-learnhouse-learning-service-key"] == SERVICE_KEY
     assert headers["x-learning-actor"] == f"lh-{org_id}-{owner.user_uuid}"
     assert seen[1][0] == "PATCH" and seen[1][1].endswith("/api/v1/notizen/11111111-1111-4111-8111-111111111111")
+
+
+def test_media_paths_become_absolute_on_the_player_origin(monkeypatch) -> None:
+    # 27.10.: drawn terminal windows live on learning-api, not on LearnHouse; the practice
+    # page would load "/lernsequenz-medien/..." from its own host and show nothing.
+    from src.routers.learning import practice
+
+    monkeypatch.setenv("LEARNHOUSE_LEARNING_PLAYER_ORIGIN", "http://100.67.177.45:8090/")
+    result = {"task": {"type": "fill_in", "presentation": {
+        "image": "/lernsequenz-medien/term-0123456789abcdef.png", "rect": {"x": 1},
+        "left": [{"id": "a", "label": "Fenster 1", "image": "/lernsequenz-medien/term-aaaaaaaaaaaaaaaa.png"},
+                 {"id": "b", "label": "Text"}],
+        "right": [{"id": "s", "label": "CMD", "image": "https://evil.example/x.png"}],
+    }}}
+
+    shown = practice._absolute_media(result)["task"]["presentation"]
+
+    assert shown["image"] == "http://100.67.177.45:8090/lernsequenz-medien/term-0123456789abcdef.png"
+    assert shown["left"][0]["image"] == "http://100.67.177.45:8090/lernsequenz-medien/term-aaaaaaaaaaaaaaaa.png"
+    assert "image" not in shown["left"][1] and "image" not in shown["right"][0]
+
+
+def test_without_a_player_origin_media_paths_are_dropped(monkeypatch) -> None:
+    from src.routers.learning import practice
+
+    monkeypatch.delenv("LEARNHOUSE_LEARNING_PLAYER_ORIGIN", raising=False)
+    result = {"task": {"presentation": {"image": "/lernsequenz-medien/term-0123456789abcdef.png", "template": "x"}}}
+
+    assert "image" not in practice._absolute_media(result)["task"]["presentation"]

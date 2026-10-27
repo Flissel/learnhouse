@@ -73,4 +73,32 @@ describe('practiceTask for hands-on items', () => {
     expect(model.task?.type).toBe('fill_in')
     expect((model.task as any).template).toBe('irm https://claude.ai/{{wert}} | iex')
   })
+
+  // 27.10.: drawn terminal windows with an empty box to fill, and windows to match.
+  test('an image fill_in keeps picture, size and boxes', () => {
+    const presentation = {
+      image: 'http://100.67.177.45:8090/lernsequenz-medien/term-0123456789abcdef.png', width: 560, height: 96, shell: 'powershell',
+      rect: { x: 280, y: 54, w: 132, h: 22 }, more: [{ x: 18, y: 80, w: 132, h: 22 }],
+    }
+    const model = practiceModel(turn({ task: { ...base, type: 'fill_in', presentation } }), { mode: 'training' })
+    expect((model.task as any).image).toEqual({ src: presentation.image, width: 560, height: 96, rect: presentation.rect, more: presentation.more })
+    expect((model.task as any).shell).toBe('powershell')
+  })
+
+  test('a broken image presentation falls back to the text blank', () => {
+    const presentation = { image: 'http://x/term.png', width: '560', rect: { x: 1 }, template: 'a {{wert}}' }
+    const model = practiceModel(turn({ task: { ...base, type: 'fill_in', presentation } }), { mode: 'training' })
+    expect((model.task as any).image).toBeUndefined()
+    expect((model.task as any).template).toBe('a {{wert}}')
+  })
+
+  test('matching items keep their window picture', () => {
+    const presentation = {
+      left: [{ id: 'f1', label: 'Fenster 1', image: 'http://h/lernsequenz-medien/term-a.png', width: 560, height: 96 }, { id: 'f2', label: 'Text' }],
+      right: [{ id: 's1', label: 'Windows CMD' }],
+    }
+    const model = practiceModel(turn({ task: { ...base, type: 'matching', presentation } }), { mode: 'training' })
+    expect((model.task as any).left[0].image).toEqual({ src: 'http://h/lernsequenz-medien/term-a.png', width: 560, height: 96 })
+    expect((model.task as any).left[1].image).toBeUndefined()
+  })
 })

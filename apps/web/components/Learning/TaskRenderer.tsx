@@ -29,10 +29,23 @@ export interface OrderingTask extends TaskBase {
   items: Array<{ id: string; label: string }>
 }
 
+export interface Picture {
+  src: string
+  width: number
+  height: number
+}
+
+export interface Box {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
 export interface MatchingTask extends TaskBase {
   type: 'matching'
-  left: Array<{ id: string; label: string }>
-  right: Array<{ id: string; label: string }>
+  left: Array<{ id: string; label: string; image?: Picture }>
+  right: Array<{ id: string; label: string; image?: Picture }>
 }
 
 export interface FillInTask extends TaskBase {
@@ -40,6 +53,9 @@ export interface FillInTask extends TaskBase {
   // A command with one {{blank}}; the learner types what belongs there.
   template: string
   shell?: string
+  // A drawn terminal window instead of the text line: the input sits on the empty box,
+  // further boxes of the same blank mirror it.
+  image?: Picture & { rect: Box; more: Box[] }
 }
 
 export interface OpenResponseTask extends TaskBase {
@@ -100,6 +116,51 @@ function OrderingField({ items }: { items: Array<{ id: string; label: string }> 
         </li>
       ))}
     </ol>
+  )
+}
+
+const percent = (r: Box, image: Picture) => ({
+  left: `${(r.x / image.width) * 100}%`,
+  top: `${(r.y / image.height) * 100}%`,
+  width: `${(r.w / image.width) * 100}%`,
+  height: `${(r.h / image.height) * 100}%`,
+  // Grows with the picture: the box height in container-width units.
+  fontSize: `clamp(9px, ${((r.h / image.width) * 100 * 0.72).toFixed(3)}cqw, 18px)`,
+})
+
+function ImageFillInField({ image, shell }: { image: Picture & { rect: Box; more: Box[] }; shell?: string }) {
+  const [value, setValue] = useState('')
+  const name = shell ? SHELL_NAMES[shell] ?? shell : 'Terminal'
+  return (
+    <div
+      className="relative w-full max-w-[560px] overflow-hidden rounded-md border border-zinc-300"
+      style={{ aspectRatio: `${image.width} / ${image.height}`, containerType: 'inline-size' }}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element -- drawn window served by learning-api */}
+      <img alt={`Fenster von ${name}`} className="absolute inset-0 h-full w-full" height={image.height} src={image.src} width={image.width} />
+      <input
+        aria-label={`Lücke im Fenster von ${name}`}
+        autoComplete="off"
+        className="absolute box-border rounded-sm border-2 border-amber-600 bg-amber-50 px-1 font-mono leading-none text-zinc-950 outline-none focus:border-blue-700"
+        id="answer"
+        name="answer"
+        onInput={(event) => setValue(event.currentTarget.value)}
+        required
+        spellCheck={false}
+        style={percent(image.rect, image)}
+        type="text"
+      />
+      {image.more.map((r, index) => (
+        <span
+          aria-hidden="true"
+          className="absolute box-border flex items-center overflow-hidden whitespace-nowrap rounded-sm border-2 border-dashed border-amber-600 bg-amber-50 px-1 font-mono leading-none text-zinc-600"
+          key={index}
+          style={percent(r, image)}
+        >
+          {value}
+        </span>
+      ))}
+    </div>
   )
 }
 
@@ -170,6 +231,10 @@ export default function TaskRenderer({ task, submitLabel, onSubmit, onOpenCanvas
             {task.left.map((item, index) => (
               <label className="flex flex-wrap items-center gap-3 rounded-md border border-zinc-200 px-3 py-2" key={item.id}>
                 <span className="min-w-[140px] flex-1 break-words text-sm font-semibold text-zinc-900">{item.label}</span>
+                {item.image ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- drawn window served by learning-api
+                  <img alt={item.label} className="block h-auto w-full max-w-[560px] basis-full rounded-md border border-zinc-200" height={item.image.height} src={item.image.src} width={item.image.width} />
+                ) : null}
                 <select
                   className="h-11 min-w-[180px] rounded-md border border-zinc-300 bg-white px-2 text-sm"
                   defaultValue=""
@@ -184,7 +249,7 @@ export default function TaskRenderer({ task, submitLabel, onSubmit, onOpenCanvas
             ))}
           </div>
         ) : task.type === 'fill_in' ? (
-          <FillInField shell={task.shell} template={task.template} />
+          task.image ? <ImageFillInField image={task.image} shell={task.shell} /> : <FillInField shell={task.shell} template={task.template} />
         ) : task.type === 'canvas' && task.canvasUrl ? (
           <iframe
             className="h-[780px] w-full rounded-md border border-zinc-300 bg-white"

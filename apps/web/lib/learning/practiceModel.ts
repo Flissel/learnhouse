@@ -1,5 +1,5 @@
 import type { LearningPlayerModel } from '@components/Learning/LearningPlayer'
-import type { LearningTask } from '@components/Learning/TaskRenderer'
+import type { Box, LearningTask, Picture } from '@components/Learning/TaskRenderer'
 import { evidenceTitle, type PracticeTask, type PracticeTurn } from '@/services/learning/practice'
 
 const FEEDBACK: Record<string, { state: 'correct' | 'incorrect' | 'needs_review'; message: string }> = {
@@ -32,17 +32,44 @@ export function practiceTask(task: PracticeTask): LearningTask {
   if (task.type === 'fill_in') {
     const template = typeof task.presentation?.template === 'string' ? task.presentation.template : '{{wert}}'
     const shell = typeof task.presentation?.shell === 'string' ? task.presentation.shell : undefined
+    // A drawn terminal window: the input sits on its empty box.
+    const pic = picture(task.presentation)
+    const rect = box(task.presentation?.rect)
+    if (pic && rect) {
+      const more = Array.isArray(task.presentation?.more) ? task.presentation.more.map(box).filter((b): b is Box => !!b) : []
+      return { ...base, type: 'fill_in', template, shell, image: { ...pic, rect, more } }
+    }
     return { ...base, type: 'fill_in', template, shell }
   }
   return { ...base, type: 'open_response' }
 }
 
-function pairItems(value: unknown): Array<{ id: string; label: string }> {
+function pairItems(value: unknown): Array<{ id: string; label: string; image?: Picture }> {
   if (!Array.isArray(value)) return []
   return value
     .filter((item): item is { id: string; label: string } =>
       typeof item === 'object' && item !== null && typeof (item as any).id === 'string' && typeof (item as any).label === 'string')
-    .map((item) => ({ id: item.id, label: item.label }))
+    .map((item) => {
+      const pic = picture(item)
+      return pic ? { id: item.id, label: item.label, image: pic } : { id: item.id, label: item.label }
+    })
+}
+
+const positive = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0
+
+/** A picture the engine sent (already absolute on learning-api's origin), with its size. */
+function picture(value: unknown): Picture | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const { image, width, height } = value as Record<string, unknown>
+  if (typeof image !== 'string' || !/^https?:\/\//.test(image) || !positive(width) || !positive(height)) return undefined
+  return { src: image, width, height }
+}
+
+function box(value: unknown): Box | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const { x, y, w, h } = value as Record<string, unknown>
+  const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0
+  return finite(x) && finite(y) && positive(w) && positive(h) ? { x, y, w, h } : undefined
 }
 
 /** The engine's turn as the Learning Player shows it. */

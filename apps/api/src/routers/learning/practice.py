@@ -108,7 +108,38 @@ async def _call(tool: str, event: dict[str, Any], *, write: bool = False, fresh:
         error = payload.get("error")
         detail = error.get("message") if isinstance(error, dict) else str(error or "rejected")
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(detail)[:300])
-    return {"state": payload.get("state"), "result": payload.get("result") or {}, "evidence": payload.get("evidence")}
+    return {"state": payload.get("state"), "result": _absolute_media(payload.get("result") or {}),
+            "evidence": payload.get("evidence")}
+
+
+_MEDIA_PATH = re.compile(r"^/lernsequenz-medien/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.(png|jpg|webp)$")
+
+
+def _absolute_media(result: dict[str, Any]) -> dict[str, Any]:
+    """Pictures of a task (drawn terminal windows) are served by learning-api: their paths
+    get the player origin. Anything else in an image field is dropped, as is every picture
+    when no origin is configured (the page would load it from its own host)."""
+    task = result.get("task") if isinstance(result, dict) else None
+    presentation = task.get("presentation") if isinstance(task, dict) else None
+    if not isinstance(presentation, dict):
+        return result
+    origin = _player_origin()
+
+    def fix(entry: dict[str, Any]) -> None:
+        image = entry.get("image")
+        if image is None:
+            return
+        if origin and isinstance(image, str) and _MEDIA_PATH.fullmatch(image):
+            entry["image"] = origin + image
+        else:
+            entry.pop("image")
+
+    fix(presentation)
+    for side in ("left", "right"):
+        for entry in presentation.get(side) or []:
+            if isinstance(entry, dict):
+                fix(entry)
+    return result
 
 
 def _actor(user: PublicUser, org_id: int | None) -> dict[str, str]:
