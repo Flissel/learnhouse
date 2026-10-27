@@ -5,6 +5,7 @@ import { getUriWithOrg } from '@services/config/config'
 import { getCourseMetadata } from '@services/courses/courses'
 import { useTrail } from '@/hooks/queries/useTrail'
 import ActivityIndicators from '@components/Pages/Courses/ActivityIndicators'
+import CourseStart from '@components/Pages/Courses/CourseStart'
 import { useRouter } from 'next/navigation'
 import GeneralWrapperStyled from '@components/Objects/StyledElements/Wrappers/GeneralWrapper'
 import {
@@ -352,6 +353,11 @@ const CourseClient = (props: any) => {
                 courseName={course.name}
                 courseUrl={getUriWithOrg(orgslug, `/course/${courseuuid}`)}
               />
+            </div>
+
+            {/* VibeMind: where to continue, and the chapters at a glance, before the details. */}
+            <div className="pt-2 pb-4">
+              <CourseStart course={course} trail={trailData} orgslug={orgslug} />
             </div>
 
             <div className="flex flex-col md:flex-row gap-8 pt-2">

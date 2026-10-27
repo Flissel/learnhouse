@@ -32,6 +32,7 @@ import ActivityChapterDropdown from '@components/Pages/Activity/ActivityChapterD
 import ActivityShareDropdown from '@components/Pages/Activity/ActivityShareDropdown'
 import FixedActivitySecondaryBar from '@components/Pages/Activity/FixedActivitySecondaryBar'
 import CourseEndView from '@components/Pages/Activity/CourseEndView'
+import LessonLayout from '@components/Pages/Activity/LessonLayout'
 import { motion, AnimatePresence } from 'motion/react'
 import { Breadcrumbs } from '@components/Objects/Breadcrumbs/Breadcrumbs'
 import { BookCopy } from 'lucide-react'
@@ -330,7 +331,7 @@ function ActivityClient(props: ActivityClientProps) {
         }
         return (
           <Suspense fallback={<LoadingFallback />}>
-            <Canva content={activity.content} activity={activity} courseUuid={course?.course_uuid} orgUuid={org?.org_uuid} />
+            <LessonLayout content={activity.content} activity={activity} courseUuid={course?.course_uuid} orgUuid={org?.org_uuid} />
           </Suspense>
         );
       case 'TYPE_VIDEO':
