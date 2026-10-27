@@ -1,3 +1,4 @@
+// @ts-expect-error Bun supplies this runtime module; the web tsconfig intentionally omits Bun globals.
 import { describe, expect, test } from 'bun:test'
 import { isSequencePlayer, withPersonToken } from './embedLink'
 
