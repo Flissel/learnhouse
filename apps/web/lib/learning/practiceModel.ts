@@ -25,7 +25,24 @@ export function practiceTask(task: PracticeTask): LearningTask {
   }
   if (task.type === 'penecho_canvas') return { ...base, type: 'canvas' }
   if (task.type === 'case' || task.type === 'code') return { ...base, type: task.type }
+  if (task.type === 'ordering') return { ...base, type: 'ordering', items: task.options }
+  if (task.type === 'matching') {
+    return { ...base, type: 'matching', left: pairItems(task.presentation?.left), right: pairItems(task.presentation?.right) }
+  }
+  if (task.type === 'fill_in') {
+    const template = typeof task.presentation?.template === 'string' ? task.presentation.template : '{{wert}}'
+    const shell = typeof task.presentation?.shell === 'string' ? task.presentation.shell : undefined
+    return { ...base, type: 'fill_in', template, shell }
+  }
   return { ...base, type: 'open_response' }
+}
+
+function pairItems(value: unknown): Array<{ id: string; label: string }> {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((item): item is { id: string; label: string } =>
+      typeof item === 'object' && item !== null && typeof (item as any).id === 'string' && typeof (item as any).label === 'string')
+    .map((item) => ({ id: item.id, label: item.label }))
 }
 
 /** The engine's turn as the Learning Player shows it. */

@@ -18,6 +18,8 @@ export interface PracticeTask {
   prompt: string
   options: PracticeOption[]
   source_refs: string[]
+  /** Per-type extras the engine allows the learner to see (matching: left/right; fill_in: template). */
+  presentation?: Record<string, unknown>
 }
 
 export interface PracticeFeedback {
@@ -46,7 +48,12 @@ export interface PracticeReply {
   }
 }
 
-export type PracticeAnswer = { choice_id: string } | { choice_ids: string[] } | { text: string }
+export type PracticeAnswer =
+  | { choice_id: string }
+  | { choice_ids: string[] }
+  | { text: string }
+  | { order: string[] }
+  | { pairs: Record<string, string> }
 
 async function call<T = PracticeReply>(path: string, method: 'GET' | 'POST' | 'PATCH', token: string | undefined, body?: unknown): Promise<T> {
   const response = await secureFetch(

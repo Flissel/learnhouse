@@ -50,3 +50,27 @@ describe('practiceModel', () => {
     expect(practiceModel(null, { mode: 'exam' }).task).toBeNull()
   })
 })
+
+describe('practiceTask for hands-on items', () => {
+  const base = { id: 't9', prompt: 'Sortiere', options: [] as Array<{ id: string; label: string }>, source_refs: [ref] }
+
+  test('ordering keeps the (already shuffled) options as items', () => {
+    const model = practiceModel(turn({ task: { ...base, type: 'ordering', options: [{ id: 's2', label: 'Zwei' }, { id: 's1', label: 'Eins' }] } }), { mode: 'training' })
+    expect(model.task?.type).toBe('ordering')
+    expect((model.task as any).items.map((i: any) => i.id)).toEqual(['s2', 's1'])
+  })
+
+  test('matching takes left and right from the presentation', () => {
+    const presentation = { left: [{ id: 'b1', label: 'Terminal' }], right: [{ id: 'e1', label: 'Das Fenster für Befehle' }] }
+    const model = practiceModel(turn({ task: { ...base, type: 'matching', presentation } }), { mode: 'training' })
+    expect(model.task?.type).toBe('matching')
+    expect((model.task as any).left[0].label).toBe('Terminal')
+    expect((model.task as any).right[0].id).toBe('e1')
+  })
+
+  test('fill_in carries the template with its blank', () => {
+    const model = practiceModel(turn({ task: { ...base, type: 'fill_in', presentation: { template: 'irm https://claude.ai/{{wert}} | iex', shell: 'powershell' } } }), { mode: 'training' })
+    expect(model.task?.type).toBe('fill_in')
+    expect((model.task as any).template).toBe('irm https://claude.ai/{{wert}} | iex')
+  })
+})

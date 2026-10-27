@@ -1,4 +1,4 @@
-import type { FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 
 import SourceEvidence, { type SourceEvidenceItem } from './SourceEvidence'
 
@@ -15,8 +15,32 @@ export interface MultipleChoiceTask extends TaskBase {
   multiple?: boolean
 }
 
-/** What the Learning engine scores: one option, several options, or text. */
-export type TaskAnswer = { choice_id: string } | { choice_ids: string[] } | { text: string }
+/** What the Learning engine scores: one option, several options, text, an order, or pairs. */
+export type TaskAnswer =
+  | { choice_id: string }
+  | { choice_ids: string[] }
+  | { text: string }
+  | { order: string[] }
+  | { pairs: Record<string, string> }
+
+export interface OrderingTask extends TaskBase {
+  type: 'ordering'
+  // Already shuffled by the engine; the learner puts them in order.
+  items: Array<{ id: string; label: string }>
+}
+
+export interface MatchingTask extends TaskBase {
+  type: 'matching'
+  left: Array<{ id: string; label: string }>
+  right: Array<{ id: string; label: string }>
+}
+
+export interface FillInTask extends TaskBase {
+  type: 'fill_in'
+  // A command with one {{blank}}; the learner types what belongs there.
+  template: string
+  shell?: string
+}
 
 export interface OpenResponseTask extends TaskBase {
   type: 'open_response' | 'case' | 'code'
@@ -29,7 +53,7 @@ export interface CanvasTask extends TaskBase {
   canvasUrl?: string
 }
 
-export type LearningTask = MultipleChoiceTask | OpenResponseTask | CanvasTask
+export type LearningTask = MultipleChoiceTask | OpenResponseTask | CanvasTask | OrderingTask | MatchingTask | FillInTask
 
 interface TaskRendererProps {
   task: LearningTask
@@ -44,7 +68,71 @@ export function answerFromForm(task: LearningTask, form: FormData): TaskAnswer {
     const chosen = form.getAll('answer').map(String)
     return task.multiple ? { choice_ids: chosen } : { choice_id: chosen[0] ?? '' }
   }
+  if (task.type === 'ordering') return { order: form.getAll('order').map(String) }
+  if (task.type === 'matching') {
+    return { pairs: Object.fromEntries(task.left.map((item) => [item.id, String(form.get(`pair:${item.id}`) ?? '')])) }
+  }
   return { text: String(form.get('answer') ?? '') }
+}
+
+const SHELL_NAMES: Record<string, string> = { powershell: 'Windows PowerShell', cmd: 'Windows CMD', unix: 'macOS / Linux' }
+
+/** The order as a list with up/down buttons; hidden inputs carry it in the form. */
+function OrderingField({ items }: { items: Array<{ id: string; label: string }> }) {
+  const [order, setOrder] = useState(items.map((item) => item.id))
+  const labels = Object.fromEntries(items.map((item) => [item.id, item.label]))
+  const move = (index: number, delta: number) => {
+    const target = index + delta
+    if (target < 0 || target >= order.length) return
+    const next = [...order]
+    ;[next[index], next[target]] = [next[target], next[index]]
+    setOrder(next)
+  }
+  return (
+    <ol aria-label="Reihenfolge" className="space-y-2">
+      {order.map((id, index) => (
+        <li className="flex items-center gap-3 rounded-md border border-zinc-200 px-3 py-2" key={id}>
+          <input name="order" type="hidden" value={id} />
+          <span className="w-6 text-sm font-semibold text-zinc-500">{index + 1}.</span>
+          <span className="min-w-0 flex-1 break-words text-sm text-zinc-900">{labels[id]}</span>
+          <button aria-label="Nach oben" className="h-11 w-11 rounded-md border border-zinc-300 text-base hover:bg-zinc-100 disabled:opacity-40" disabled={index === 0} onClick={() => move(index, -1)} type="button">↑</button>
+          <button aria-label="Nach unten" className="h-11 w-11 rounded-md border border-zinc-300 text-base hover:bg-zinc-100 disabled:opacity-40" disabled={index === order.length - 1} onClick={() => move(index, 1)} type="button">↓</button>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+function FillInField({ template, shell }: { template: string; shell?: string }) {
+  const parts = template.split(/(\{\{\w+\}\})/).filter(Boolean)
+  let placed = false
+  return (
+    <div>
+      {shell ? <p className="mb-2 text-xs text-zinc-500">Für {SHELL_NAMES[shell] ?? shell}</p> : null}
+      <pre className="flex flex-wrap items-center gap-1 whitespace-pre-wrap rounded-md bg-zinc-950 px-4 py-3 font-mono text-sm text-zinc-100">
+        {parts.map((part, index) => {
+          if (/^\{\{\w+\}\}$/.test(part)) {
+            if (placed) return <span className="rounded border border-dashed border-zinc-500 px-2 text-zinc-400" key={index}>…</span>
+            placed = true
+            return (
+              <input
+                aria-label="Lücke"
+                autoComplete="off"
+                className="h-9 min-w-[12ch] rounded border border-zinc-400 bg-white px-2 font-mono text-sm text-zinc-950"
+                id="answer"
+                key={index}
+                name="answer"
+                required
+                spellCheck={false}
+                type="text"
+              />
+            )
+          }
+          return <span key={index}>{part}</span>
+        })}
+      </pre>
+    </div>
+  )
 }
 
 export default function TaskRenderer({ task, submitLabel, onSubmit, onOpenCanvas, disabled }: TaskRendererProps) {
@@ -75,6 +163,28 @@ export default function TaskRenderer({ task, submitLabel, onSubmit, onOpenCanvas
               </label>
             ))}
           </fieldset>
+        ) : task.type === 'ordering' ? (
+          <OrderingField items={task.items} />
+        ) : task.type === 'matching' ? (
+          <div className="space-y-2">
+            {task.left.map((item, index) => (
+              <label className="flex flex-wrap items-center gap-3 rounded-md border border-zinc-200 px-3 py-2" key={item.id}>
+                <span className="min-w-[140px] flex-1 break-words text-sm font-semibold text-zinc-900">{item.label}</span>
+                <select
+                  className="h-11 min-w-[180px] rounded-md border border-zinc-300 bg-white px-2 text-sm"
+                  defaultValue=""
+                  id={index === 0 ? 'answer' : undefined}
+                  name={`pair:${item.id}`}
+                  required
+                >
+                  <option disabled value="">– bitte wählen –</option>
+                  {task.right.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+                </select>
+              </label>
+            ))}
+          </div>
+        ) : task.type === 'fill_in' ? (
+          <FillInField shell={task.shell} template={task.template} />
         ) : task.type === 'canvas' && task.canvasUrl ? (
           <iframe
             className="h-[780px] w-full rounded-md border border-zinc-300 bg-white"
