@@ -137,3 +137,43 @@ async def test_player_token_is_signed_for_the_person(db, monkeypatch) -> None:
     async with _practice_client(db, person) as client:
         unconfigured = await client.get("/api/v1/learning/practice/player-token")
     assert unconfigured.status_code == 200 and unconfigured.json()["origin"] is None
+
+
+@pytest.mark.asyncio
+async def test_notes_are_proxied_for_the_signed_in_person_only(db, monkeypatch) -> None:
+    import httpx
+
+    _enable_local_mode(monkeypatch)
+    monkeypatch.setenv("LEARNING_RETRIEVAL_SERVICE_URL", "http://learning-api:8090")
+    seen: list[tuple[str, str, dict[str, str]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, str(request.url), dict(request.headers)))
+        if request.method == "GET":
+            return httpx.Response(200, json={"notes": [{"id": "11111111-1111-4111-8111-111111111111", "selection": "x"}]})
+        return httpx.Response(200, json={"id": "11111111-1111-4111-8111-111111111111", "own_text": "Merken"})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(practice.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), timeout=kw.get("timeout")))
+    async with _mounted_learning_client(db) as service:
+        await service.post("/api/v1/learning/courses", headers={SERVICE_HEADER: SERVICE_KEY},
+                           json={"title": "Notes target", "description": "", "about": ""})
+    owner = (await db.execute(select(User))).scalars().first()
+    org_id = (await db.execute(select(UserOrganization.org_id).where(UserOrganization.user_id == owner.id))).scalars().first()
+    person = PublicUser.model_validate(owner, from_attributes=True)
+    async with _practice_client(db, person) as client:
+        listed = await client.get("/api/v1/learning/practice/notes?actor=lh-9-evil")
+        changed = await client.patch("/api/v1/learning/practice/notes/11111111-1111-4111-8111-111111111111", json={"own_text": "Merken"})
+        odd = await client.patch("/api/v1/learning/practice/notes/not-an-id", json={"own_text": "x"})
+    async with _practice_client(db, AnonymousUser()) as anonymous:
+        refused = await anonymous.get("/api/v1/learning/practice/notes")
+
+    assert listed.status_code == 200 and listed.json()["notes"][0]["selection"] == "x"
+    assert changed.status_code == 200 and changed.json()["own_text"] == "Merken"
+    assert odd.status_code == 400 and refused.status_code == 401
+    method, url, headers = seen[0]
+    assert (method, url) == ("GET", "http://learning-api:8090/api/v1/notizen")
+    # The person comes from the server session; the service key never reaches the browser.
+    assert headers["x-learnhouse-learning-service-key"] == SERVICE_KEY
+    assert headers["x-learning-actor"] == f"lh-{org_id}-{owner.user_uuid}"
+    assert seen[1][0] == "PATCH" and seen[1][1].endswith("/api/v1/notizen/11111111-1111-4111-8111-111111111111")

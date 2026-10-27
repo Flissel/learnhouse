@@ -25,7 +25,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.events.database import get_db_session
 from src.db.user_organizations import UserOrganization
 from src.db.users import PublicUser
-from src.routers.learning.service import _authorize_course, _course_by_public_id, _state_for_course
+from src.routers.learning.service import (
+    LOCAL_LEARNING_SERVICE_KEY_ENV,
+    _authorize_course,
+    _course_by_public_id,
+    _state_for_course,
+)
 from src.security.auth import get_current_user
 from src.security.rbac import AccessAction
 
@@ -59,6 +64,10 @@ class TutorQuestion(_Strict):
 
 class CanvasOpen(_Strict):
     activity_id: UUID
+
+
+class NoteText(_Strict):
+    own_text: str = Field(max_length=10_000)
 
 
 def learner_id(user: PublicUser, org_id: int | None) -> str:
@@ -237,3 +246,56 @@ async def tutor(
         "event_type": "learning.tutor.ask", "actor": _actor(user, org_id), "session_id": str(session_id),
         "course_id": str(UUID(course_id.removeprefix("course_"))), "payload": {"question": payload.question},
     })
+
+
+# --- notes: kept by learning-api per person, read and annotated through this backend ---
+
+NOTES_BASE_ENV = "LEARNING_RETRIEVAL_SERVICE_URL"   # learning-api, already configured for retrieval
+_NOTE_ID = re.compile(r"^[0-9a-fA-F-]{36}$")
+
+
+async def _notes_request(
+    method: str, path: str, user: PublicUser, db_session: AsyncSession, *, json: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """learning-api's notes API, always for the signed-in person: the service key and the
+    learner id come from this server, never from the browser."""
+    key = os.environ.get(LOCAL_LEARNING_SERVICE_KEY_ENV, "")
+    if len(key) < 32:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="notes are not configured")
+    base = os.environ.get(NOTES_BASE_ENV, "http://learning-api:8090").rstrip("/")
+    headers = {
+        "X-LearnHouse-Learning-Service-Key": key,
+        "X-Learning-Actor": learner_id(user, await _org_of(db_session, user)),
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.request(method, f"{base}{path}", headers=headers, json=json)
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="learning unavailable") from error
+    if response.status_code == 404:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="note not found")
+    if response.status_code != 200:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="learning gave no answer")
+    return response.json()
+
+
+@router.get("/practice/notes")
+async def list_notes(
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    return await _notes_request("GET", "/api/v1/notizen", _person(current_user), db_session)
+
+
+@router.patch("/practice/notes/{note_id}")
+async def set_note_text(
+    note_id: str,
+    payload: NoteText,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    if not _NOTE_ID.match(note_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="note id is not valid")
+    return await _notes_request(
+        "PATCH", f"/api/v1/notizen/{note_id}", _person(current_user), db_session, json={"own_text": payload.own_text},
+    )
