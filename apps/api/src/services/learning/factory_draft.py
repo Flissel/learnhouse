@@ -22,13 +22,13 @@ from src.db.courses.chapters import Chapter
 from src.db.courses.course_chapters import CourseChapter
 from src.db.courses.courses import Course
 from src.db.courses.learning_state import LearningCourseState
-from src.services.learning.rich_text import markdown_to_doc, task_doc
+from src.services.learning.rich_text import lesson_doc, task_doc
 
 
 _FACTORY_NAMESPACE = UUID("ae21a8f6-34d8-558c-8450-330269534eff")
 _TASK_NOTE = (
-    "Diese Aufgabe bearbeitest du in der Übung mit dem Lern-Tutor. Dort wird deine "
-    "Antwort bewertet und du bekommst Hinweise."
+    "Diese Aufgabe bearbeiten Sie in der Übung mit dem Lern-Tutor. Dort wird Ihre "
+    "Antwort bewertet, und Sie bekommen Hinweise."
 )
 _HASH_PATTERN = r"^[0-9a-f]{64}$"
 
@@ -228,7 +228,7 @@ async def apply_factory_draft(
             title=lesson.title,
             kind="lesson",
             content={
-                **markdown_to_doc(lesson.body),
+                **lesson_doc(lesson.body, [claim.text for claim in lesson.claims]),
                 "markdown": lesson.body,
                 "concept_ids": lesson.concept_ids,
                 "claims": [item.model_dump(mode="json") for item in lesson.claims],

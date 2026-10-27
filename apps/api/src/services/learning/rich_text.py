@@ -6,7 +6,7 @@ configured". A ``SUBTYPE_DYNAMIC_PAGE`` document renders in the page editor and
 can later carry quiz, video and checkpoint blocks.
 
 Only the Markdown the course factory writes is supported: headings, paragraphs,
-bullet and numbered lists, block quotes, and **bold**, *italic*, `code`.
+bullet and numbered lists, block quotes, fenced code blocks, and **bold**, *italic*, `code`.
 Anything else stays literal text, never raw HTML.
 """
 
@@ -18,6 +18,8 @@ _HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
 _BULLET = re.compile(r"^\s*[-*+]\s+(.*)$")
 _NUMBERED = re.compile(r"^\s*\d+[.)]\s+(.*)$")
 _QUOTE = re.compile(r"^\s*>\s?(.*)$")
+_FENCE = re.compile(r"^\s*```\s*([A-Za-z0-9_+-]*)\s*$")
+_KEY_FACTS = "Das Wichtigste in Kürze"
 _INLINE = re.compile(r"(\*\*[^*]+\*\*|__[^_]+__|`[^`]+`|\*[^*\s][^*]*\*|_[^_\s][^_]*_)")
 
 
@@ -61,6 +63,15 @@ def markdown_to_doc(markdown: str) -> dict:
     items: list[str] = []
     list_kind = ""
     quote: list[str] = []
+    code: list[str] | None = None
+    language: str | None = None
+
+    def code_block() -> dict:
+        text = "\n".join(code or [])
+        block: dict = {"type": "codeBlock", "attrs": {"language": language}}
+        if text:
+            block["content"] = [{"type": "text", "text": text}]
+        return block
 
     def flush() -> None:
         nonlocal list_kind
@@ -77,6 +88,19 @@ def markdown_to_doc(markdown: str) -> dict:
 
     for raw in (markdown or "").replace("\r\n", "\n").split("\n"):
         line = raw.rstrip()
+        fence = _FENCE.match(line)
+        if code is not None:
+            # Inside a fence every line is kept verbatim, blank lines included.
+            if fence and not fence.group(1):
+                blocks.append(code_block())
+                code, language = None, None
+            else:
+                code.append(line)
+            continue
+        if fence:
+            flush()
+            code, language = [], fence.group(1) or None
+            continue
         if not line.strip():
             flush()
             continue
@@ -108,7 +132,22 @@ def markdown_to_doc(markdown: str) -> dict:
             flush()
         paragraph.append(line.strip())
     flush()
+    if code is not None:
+        blocks.append(code_block())
     return {"type": "doc", "content": blocks or [{"type": "paragraph"}]}
+
+
+def lesson_doc(markdown: str, key_facts: list[str]) -> dict:
+    """A lesson page: the lesson text, then its key facts (the factory's claims) as a list."""
+    doc = markdown_to_doc(markdown)
+    facts = [fact.strip() for fact in key_facts if fact.strip()]
+    if facts:
+        doc["content"] = [
+            *doc["content"],
+            {"type": "heading", "attrs": {"level": 3}, "content": [{"type": "text", "text": _KEY_FACTS}]},
+            _list("bulletList", facts),
+        ]
+    return doc
 
 
 def task_doc(prompt: str, note: str) -> dict:

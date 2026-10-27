@@ -156,10 +156,14 @@ async def test_factory_draft_maps_real_course_structure_and_has_readback(
         assert activity.content["type"] == "doc"
     lesson_text = json.dumps(by_kind["lesson"].content["content"])
     assert "Provider execution stays behind OpenFang." in lesson_text
+    # 27.10.: the claims were stored but never shown; the page now ends with them.
+    assert "Das Wichtigste in K\\u00fcrze" in lesson_text  # json.dumps escapes the umlaut
     task = by_kind["case"].content
     assert "expected_answer" not in task and "rubric" not in task
     assert "Route through OpenFang." not in json.dumps(task)
     assert task["content"][0]["content"][0]["text"] == "Choose the authorized path."
+    # One form of address in the whole course: the note used to say "du".
+    assert "bearbeiten Sie" in task["content"][1]["content"][0]["text"]
 
 
 @pytest.mark.asyncio
