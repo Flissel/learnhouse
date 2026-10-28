@@ -41,6 +41,11 @@ from src.services.learning.factory_draft import (
     apply_factory_draft,
     factory_draft_readback,
 )
+from src.services.learning.werkstatt_stand import (
+    WerkstattStandRead,
+    WerkstattStandWrite,
+    apply_werkstatt_stand,
+)
 
 
 LOCAL_LEARNING_SERVICE_KEY_ENV = "LEARNHOUSE_LEARNING_SERVICE_KEY"
@@ -522,6 +527,33 @@ async def put_factory_draft(
     )
     await db_session.commit()
     return FactoryDraftEnvelope(draft=draft)
+
+
+@router.put(
+    "/courses/{course_id}/werkstatt-stand",
+    response_model=WerkstattStandRead,
+    dependencies=[Depends(require_local_learning_service)],
+)
+async def put_werkstatt_stand(
+    course_id: str,
+    payload: WerkstattStandWrite,
+    request: Request,
+    db_session: AsyncSession = Depends(get_db_session),
+) -> WerkstattStandRead:
+    """A released Werkstatt state into the course, also a published one, updating in place."""
+    owner, _ = await _local_owner(db_session)
+    course = await _course_by_public_id(db_session, course_id)
+    await _authorize_course(request, db_session, owner, course, AccessAction.UPDATE)
+    state = await _state_for_course(db_session, course)
+    result = await apply_werkstatt_stand(
+        db_session=db_session,
+        course=course,
+        state=state,
+        payload=payload,
+        user_id=getattr(owner, "id", None),
+    )
+    await db_session.commit()
+    return result
 
 
 @router.get(

@@ -58,6 +58,28 @@ async def create_activity_version(
     return version
 
 
+def stage_activity_version(
+    activity: Activity,
+    user_id: Optional[int],
+    db_session: AsyncSession,
+) -> ActivityVersion:
+    """
+    Like create_activity_version, but only adds the snapshot to the session: no commit,
+    no webhook. For callers that must write several rows in one transaction, so a later
+    failure rolls the snapshot back with everything else.
+    """
+    version = ActivityVersion(
+        activity_id=activity.id,
+        org_id=activity.org_id,
+        version_number=activity.current_version,
+        content=activity.content,
+        created_by_id=user_id,
+        created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+    )
+    db_session.add(version)
+    return version
+
+
 async def cleanup_old_versions(
     activity_id: int,
     db_session: AsyncSession,
