@@ -110,7 +110,9 @@ async def apply_werkstatt_stand(
     ).hexdigest()
     if payload.freigabe_id in done:
         stored = done[payload.freigabe_id]
-        if stored.get("hash") != body_hash:
+        if "hash" not in stored:  # legacy shape: the bare result, no body hash to compare
+            return WerkstattStandRead.model_validate(stored)
+        if stored["hash"] != body_hash:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT, detail="freigabe_id_reused"
             )

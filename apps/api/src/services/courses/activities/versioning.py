@@ -75,7 +75,7 @@ async def stage_activity_version(
     version = _build_version(activity, user_id)
     db_session.add(version)
     await db_session.flush()
-    await cleanup_old_versions(activity.id, db_session)
+    await prune_old_versions(activity.id, db_session)
     return version
 
 
@@ -84,7 +84,19 @@ async def cleanup_old_versions(
     db_session: AsyncSession,
 ) -> None:
     """
-    Removes old versions keeping only the last MAX_ACTIVITY_VERSIONS.
+    Removes old versions keeping only the last MAX_ACTIVITY_VERSIONS (commits if it deleted).
+    """
+    if await prune_old_versions(activity_id, db_session):
+        await db_session.commit()
+
+
+async def prune_old_versions(
+    activity_id: int,
+    db_session: AsyncSession,
+) -> bool:
+    """
+    Delete-only retention: flushes the deletions but never commits, so it is safe inside
+    a caller's transaction. Returns whether anything was deleted.
     """
     # Get all versions for this activity ordered by version number descending
     statement = (
@@ -99,7 +111,9 @@ async def cleanup_old_versions(
         versions_to_delete = versions[MAX_ACTIVITY_VERSIONS:]
         for version in versions_to_delete:
             await db_session.delete(version)
-        await db_session.commit()
+        await db_session.flush()
+        return True
+    return False
 
 
 async def get_activity_versions(

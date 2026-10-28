@@ -374,3 +374,44 @@ async def test_kapitel_wird_ueber_titel_wiederverwendet(db, monkeypatch) -> None
     assert response.status_code == 200
     assert len((await db.execute(select(Chapter))).scalars().all()) == 1
     assert len((await db.execute(select(CourseChapter))).scalars().all()) == 1
+
+
+@pytest.mark.asyncio
+async def test_rollback_auch_am_versionslimit(db, monkeypatch) -> None:
+    from src.services.courses.activities.versioning import MAX_ACTIVITY_VERSIONS
+
+    _enable_local_mode(monkeypatch)
+    real = stand_module._content_for
+    calls = {"n": 0}
+
+    def flaky(entry):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("erzwungener Fehler")
+        return real(entry)
+
+    async with _mounted_learning_client(db) as client:
+        course_id, rev = await _published_course(client)
+        lesson = next(a for a in await _activities(db) if a.extra_metadata["draft_activity_id"] == "lesson-authority")
+        lesson_id, org_id, old_content = lesson.id, lesson.org_id, lesson.content
+        lesson.current_version = MAX_ACTIVITY_VERSIONS + 5
+        for number in range(1, MAX_ACTIVITY_VERSIONS + 1):
+            db.add(ActivityVersion(activity_id=lesson_id, org_id=org_id, version_number=number, content={}))
+        await db.commit()
+        monkeypatch.setattr(stand_module, "_content_for", flaky)
+        with pytest.raises(RuntimeError):
+            await _put(
+                client, course_id, rev, "f1",
+                _lektion("lesson-authority", "A", "Zwischenstand."),
+                _aufgabe("task-authority", "A", "Frage?"),
+            )
+    numbers = sorted(
+        v.version_number
+        for v in (await db.execute(select(ActivityVersion).where(ActivityVersion.activity_id == lesson_id))).scalars().all()
+    )
+    assert numbers == list(range(1, MAX_ACTIVITY_VERSIONS + 1))
+    lesson = next(a for a in await _activities(db) if a.id == lesson_id)
+    assert lesson.content == old_content and lesson.current_version == MAX_ACTIVITY_VERSIONS + 5
+    state = (await db.execute(select(LearningCourseState))).scalars().first()
+    await db.refresh(state)
+    assert state.revision == rev and "werkstatt_freigaben" not in (state.source_metadata or {})
