@@ -131,6 +131,35 @@ async def test_neuer_schluessel_legt_veroeffentlichte_aktivitaet_an(db, monkeypa
 
 @pytest.mark.asyncio
 async def test_entfernte_schluessel_werden_unveroeffentlicht(db, monkeypatch) -> None:
+    # A Werkstatt-written activity (it carries werkstatt_key) missing from the next state goes offline.
+    _enable_local_mode(monkeypatch)
+    async with _mounted_learning_client(db) as client:
+        course_id, rev = await _published_course(client)
+        first = await client.put(
+            _url(course_id), headers=H,
+            json=_stand(rev, "f1", _foundations(
+                _lektion("lesson-authority", "Autoritaet", "Text."), _aufgabe("neu-1", "A", "Frage?"),
+            )),
+        )
+        response = await client.put(
+            _url(course_id), headers=H,
+            json=_stand(rev + 1, "f2", _foundations(_lektion("lesson-authority", "Autoritaet", "Text."))),
+        )
+    assert first.status_code == 200 and response.status_code == 200, response.text
+    assert response.json()["unveroeffentlicht"] == 1
+    rows = {_key(a): a for a in await _activities(db)}
+    assert rows["neu-1"].published is False  # not deleted
+    assert rows["lesson-authority"].published is True
+
+
+def _key(activity: Activity) -> str | None:
+    meta = activity.extra_metadata or {}
+    return meta.get("werkstatt_key") or meta.get("draft_activity_id")
+
+
+@pytest.mark.asyncio
+async def test_nicht_uebernommene_fabrik_aktivitaet_bleibt(db, monkeypatch) -> None:
+    # task-authority was never taken over into the Werkstatt: without `entfernen` it stays.
     _enable_local_mode(monkeypatch)
     async with _mounted_learning_client(db) as client:
         course_id, rev = await _published_course(client)
@@ -139,10 +168,75 @@ async def test_entfernte_schluessel_werden_unveroeffentlicht(db, monkeypatch) ->
             json=_stand(rev, "f1", _foundations(_lektion("lesson-authority", "Autoritaet", "Text."))),
         )
     assert response.status_code == 200, response.text
-    assert response.json()["unveroeffentlicht"] == 1
+    assert response.json()["unveroeffentlicht"] == 0
     rows = {a.extra_metadata["draft_activity_id"]: a for a in await _activities(db)}
-    assert rows["task-authority"].published is False  # not deleted
-    assert rows["lesson-authority"].published is True
+    assert rows["task-authority"].published is True
+    assert "werkstatt_key" not in rows["task-authority"].extra_metadata
+
+
+@pytest.mark.asyncio
+async def test_nur_ausdruecklich_entfernte_fabrik_aktivitaeten_werden_unveroeffentlicht(db, monkeypatch) -> None:
+    _enable_local_mode(monkeypatch)
+    async with _mounted_learning_client(db) as client:
+        course_id, rev = await _published_course(client)
+        hand = await _plain_activity(db, "Von Hand", "activity_hand2", {"draft_activity_id": "anderes"})
+        body = _stand(rev, "f1", _foundations(_lektion("lesson-authority", "Autoritaet", "Text.")))
+        body["entfernen"] = ["task-authority", "lesson-authority", "gibt-es-nicht"]
+        response = await client.put(_url(course_id), headers=H, json=body)
+    assert response.status_code == 200, response.text
+    assert response.json()["unveroeffentlicht"] == 1
+    rows = {a.extra_metadata["draft_activity_id"]: a for a in await _activities(db) if a.extra_metadata}
+    assert rows["task-authority"].published is False
+    assert rows["lesson-authority"].published is True  # in the state, so it stays despite `entfernen`
+    assert next(a for a in await _activities(db) if a.id == hand).published is True
+
+
+@pytest.mark.asyncio
+async def test_entfernen_zaehlt_zum_koerper_der_freigabe(db, monkeypatch) -> None:
+    _enable_local_mode(monkeypatch)
+    async with _mounted_learning_client(db) as client:
+        course_id, rev = await _published_course(client)
+        body = _stand(rev, "f1", _foundations(_lektion("lesson-authority", "A", "Text.")))
+        first = await client.put(_url(course_id), headers=H, json=body)
+        other = await client.put(_url(course_id), headers=H, json={**body, "entfernen": ["task-authority"]})
+        same = await client.put(_url(course_id), headers=H, json={**body, "entfernen": []})
+    assert first.status_code == 200
+    assert other.status_code == 409 and other.json()["detail"] == "freigabe_id_reused"
+    assert same.status_code == 200 and same.json() == first.json()  # empty list = not sent
+
+
+@pytest.mark.asyncio
+async def test_kapitelreihenfolge_folgt_dem_stand(db, monkeypatch) -> None:
+    _enable_local_mode(monkeypatch)
+    async with _mounted_learning_client(db) as client:
+        course_id, rev = await _published_course(client)
+        course = await _course_row(db)
+        anhang = Chapter(
+            name="Anhang", description="", thumbnail_image="", org_id=course.org_id,
+            course_id=course.id, chapter_uuid="chapter_anhang", creation_date="", update_date="",
+        )
+        db.add(anhang)
+        await db.commit()
+        db.add(CourseChapter(
+            order=7, course_id=course.id, chapter_id=anhang.id, org_id=course.org_id,
+            creation_date="", update_date="",
+        ))
+        await db.commit()
+        response = await client.put(
+            _url(course_id), headers=H,
+            json=_stand(rev, "f1", [
+                {"titel": "Neues Kapitel", "eintraege": [_lektion("neu-1", "Neu", "Text.")]},
+                {"titel": "Foundations", "eintraege": [_lektion("lesson-authority", "A", "Text.")]},
+            ]),
+        )
+    assert response.status_code == 200, response.text
+    names = {c.id: c.name for c in (await db.execute(select(Chapter))).scalars().all()}
+    links = (await db.execute(select(CourseChapter))).scalars().all()
+    for link in links:
+        await db.refresh(link)
+    reihenfolge = [names[link.chapter_id] for link in sorted(links, key=lambda link: link.order)]
+    assert reihenfolge == ["Neues Kapitel", "Foundations", "Anhang"]
+    assert [link.order for link in sorted(links, key=lambda link: link.order)] == [1, 2, 3]
 
 
 @pytest.mark.asyncio

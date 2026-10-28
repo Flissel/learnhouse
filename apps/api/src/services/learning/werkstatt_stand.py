@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID, uuid5
 
 from fastapi import HTTPException, status
@@ -53,6 +53,11 @@ class WerkstattStandWrite(_Strict):
     expected_revision: int = Field(ge=0)
     freigabe_id: str = Field(min_length=1, max_length=200)
     kapitel: list[WerkstattKapitel] = Field(max_length=500)
+    # Keys of activities to take offline although they carry no werkstatt_key (factory
+    # content Learning knows it replaced); every other non-Werkstatt activity stays as it is.
+    entfernen: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(
+        default_factory=list, max_length=5_000
+    )
 
 
 class WerkstattStandRead(_Strict):
@@ -91,6 +96,17 @@ def _key_of(activity: Activity) -> str | None:
     return meta.get("werkstatt_key") or meta.get("draft_activity_id")
 
 
+def _body_hash(payload: WerkstattStandWrite) -> str:
+    """Canonical hash of the request; an empty `entfernen` is left out, so a body without
+    the field and one with an empty list are the same release."""
+    body = payload.model_dump(mode="json")
+    if not body["entfernen"]:
+        del body["entfernen"]
+    return hashlib.sha256(
+        json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    ).hexdigest()
+
+
 async def apply_werkstatt_stand(
     *,
     db_session: AsyncSession,
@@ -100,14 +116,7 @@ async def apply_werkstatt_stand(
     user_id: int | None = None,
 ) -> WerkstattStandRead:
     done = (state.source_metadata or {}).get(_FREIGABEN, {})
-    body_hash = hashlib.sha256(
-        json.dumps(
-            payload.model_dump(mode="json"),
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=True,
-        ).encode()
-    ).hexdigest()
+    body_hash = _body_hash(payload)
     if payload.freigabe_id in done:
         stored = done[payload.freigabe_id]
         if "hash" not in stored:  # legacy shape: the bare result, no body hash to compare
@@ -287,9 +296,15 @@ async def _apply(
         for position, link in enumerate(ordered, start=1):
             link.order = position
 
+    await _order_chapters(db_session, course, [chapters[k.titel] for k in payload.kapitel], now)
+
+    # Offline only what Learning owns: activities it wrote (werkstatt_key) and the keys it
+    # names in `entfernen`. Factory content never taken over stays untouched.
+    entfernen = set(payload.entfernen)
     unpublished = 0
     for key, activity in by_key.items():
-        if key not in seen and activity.published:
+        owned = bool((activity.extra_metadata or {}).get("werkstatt_key")) or key in entfernen
+        if owned and key not in seen and activity.published:
             activity.published = False
             activity.update_date = now
             db_session.add(activity)
@@ -310,3 +325,31 @@ async def _apply(
         },
     }
     return result
+
+
+async def _order_chapters(
+    db_session: AsyncSession, course: Course, in_payload: list[Chapter], now: str
+) -> None:
+    """Course chapter order follows the payload; other chapters follow in their old order."""
+    await db_session.flush()
+    links = (
+        await db_session.execute(
+            select(CourseChapter).where(CourseChapter.course_id == course.id)
+        )
+    ).scalars().all()
+    by_chapter = {link.chapter_id: link for link in links}
+    ordered_ids = [
+        chapter_id
+        for chapter_id in dict.fromkeys(int(c.id or 0) for c in in_payload)
+        if chapter_id in by_chapter
+    ]
+    first = [by_chapter[chapter_id] for chapter_id in ordered_ids]
+    rest = sorted(
+        (link for link in links if link.chapter_id not in set(ordered_ids)),
+        key=lambda link: (link.order, link.id or 0),
+    )
+    for position, link in enumerate([*first, *rest], start=1):
+        if link.order != position:
+            link.order = position
+            link.update_date = now
+            db_session.add(link)
