@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime
 from typing import Literal
 from uuid import UUID, uuid5
@@ -98,8 +100,47 @@ async def apply_werkstatt_stand(
     user_id: int | None = None,
 ) -> WerkstattStandRead:
     done = (state.source_metadata or {}).get(_FREIGABEN, {})
+    body_hash = hashlib.sha256(
+        json.dumps(
+            payload.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode()
+    ).hexdigest()
     if payload.freigabe_id in done:
-        return WerkstattStandRead.model_validate(done[payload.freigabe_id])
+        stored = done[payload.freigabe_id]
+        if stored.get("hash") != body_hash:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="freigabe_id_reused"
+            )
+        return WerkstattStandRead.model_validate(stored["result"])
+    try:
+        return await _apply(
+            db_session=db_session,
+            course=course,
+            state=state,
+            payload=payload,
+            user_id=user_id,
+            done=done,
+            body_hash=body_hash,
+        )
+    except BaseException:
+        # One transaction: a failure anywhere leaves nothing of the release behind.
+        await db_session.rollback()
+        raise
+
+
+async def _apply(
+    *,
+    db_session: AsyncSession,
+    course: Course,
+    state: LearningCourseState,
+    payload: WerkstattStandWrite,
+    user_id: int | None,
+    done: dict,
+    body_hash: str,
+) -> WerkstattStandRead:
 
     advanced = await db_session.execute(
         update(LearningCourseState)
@@ -185,11 +226,15 @@ async def apply_werkstatt_stand(
             content = _content_for(entry)
             activity = by_key.get(entry.key)
             if activity is not None:
-                stage_activity_version(activity, user_id, db_session)
-                activity.content = _with_kept_embeds(activity.content, content)
-                activity.name = entry.titel
-                activity.current_version = (activity.current_version or 1) + 1
-                activity.update_date = now
+                new_content = _with_kept_embeds(activity.content, content)
+                if new_content != activity.content or activity.name != entry.titel:
+                    if new_content != activity.content:
+                        await stage_activity_version(activity, user_id, db_session)
+                        activity.current_version = (activity.current_version or 1) + 1
+                        updated += 1
+                    activity.content = new_content
+                    activity.name = entry.titel
+                    activity.update_date = now
                 if published:
                     activity.published = True
                 activity.extra_metadata = {
@@ -197,7 +242,6 @@ async def apply_werkstatt_stand(
                     "werkstatt_key": entry.key,
                 }
                 db_session.add(activity)
-                updated += 1
             else:
                 activity = Activity(
                     name=entry.titel,
@@ -258,6 +302,9 @@ async def apply_werkstatt_stand(
     )
     state.source_metadata = {
         **(state.source_metadata or {}),
-        _FREIGABEN: {**done, payload.freigabe_id: result.model_dump(mode="json")},
+        _FREIGABEN: {
+            **done,
+            payload.freigabe_id: {"hash": body_hash, "result": result.model_dump(mode="json")},
+        },
     }
     return result

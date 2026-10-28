@@ -19,6 +19,18 @@ from src.services.webhooks.dispatch import dispatch_webhooks
 MAX_ACTIVITY_VERSIONS = 20
 
 
+def _build_version(activity: Activity, user_id: Optional[int]) -> ActivityVersion:
+    """The snapshot row of the activity's current content (shared by both writers)."""
+    return ActivityVersion(
+        activity_id=activity.id,
+        org_id=activity.org_id,
+        version_number=activity.current_version,
+        content=activity.content,
+        created_by_id=user_id,
+        created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+    )
+
+
 async def create_activity_version(
     activity: Activity,
     user_id: Optional[int],
@@ -28,15 +40,7 @@ async def create_activity_version(
     Creates a new version snapshot of the activity content.
     Called before updating an activity to preserve the current state.
     """
-    # Create new version
-    version = ActivityVersion(
-        activity_id=activity.id,
-        org_id=activity.org_id,
-        version_number=activity.current_version,
-        content=activity.content,
-        created_by_id=user_id,
-        created_at=datetime.now(timezone.utc).replace(tzinfo=None),
-    )
+    version = _build_version(activity, user_id)
 
     db_session.add(version)
     await db_session.commit()
@@ -58,25 +62,20 @@ async def create_activity_version(
     return version
 
 
-def stage_activity_version(
+async def stage_activity_version(
     activity: Activity,
     user_id: Optional[int],
     db_session: AsyncSession,
 ) -> ActivityVersion:
     """
-    Like create_activity_version, but only adds the snapshot to the session: no commit,
-    no webhook. For callers that must write several rows in one transaction, so a later
-    failure rolls the snapshot back with everything else.
+    Like create_activity_version (same snapshot, same MAX_ACTIVITY_VERSIONS retention), but
+    inside the caller's transaction: no commit, no webhook. For callers that write several
+    rows at once, so a later failure rolls the snapshot back with everything else.
     """
-    version = ActivityVersion(
-        activity_id=activity.id,
-        org_id=activity.org_id,
-        version_number=activity.current_version,
-        content=activity.content,
-        created_by_id=user_id,
-        created_at=datetime.now(timezone.utc).replace(tzinfo=None),
-    )
+    version = _build_version(activity, user_id)
     db_session.add(version)
+    await db_session.flush()
+    await cleanup_old_versions(activity.id, db_session)
     return version
 
 
