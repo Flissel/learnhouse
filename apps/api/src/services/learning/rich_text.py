@@ -25,19 +25,34 @@ _KEY_FACTS = "Das Wichtigste in Kürze"
 _INLINE = re.compile(r"(\*\*[^*]+\*\*|__[^_]+__|`[^`]+`|\*[^*\s][^*]*\*|_[^_\s][^_]*_)")
 # `code` spans first (so a ``$`` in code stays code), then ``$formula$``: the opener is not
 # followed by a space, the closer is not preceded by one nor followed by a digit ("5 $ and 6 $").
-_MATH_SPLIT = re.compile(r"(`[^`]+`|(?<![\$])\$(?![\s$])[^$\n]+?(?<![\s\\])\$(?![\d$]))")
+_MATH_SPLIT = re.compile(r"(`[^`]+`|(?<![\\$])\$(?![\s$])[^$\n]+?(?<![\s\\])\$(?![\d$]))")
 _BLOCK_MATH = re.compile(r"^\$\$\s*(.+?)\s*\$\$$")
+# A formula is swapped for a placeholder while emphasis is parsed, so ``**a $x$ b**`` stays one
+# bold span; the placeholder is cut back into a formula node between the marked text runs.
+_HOLDER = re.compile("\ue000(\\d+)\ue001")
 
 
 def _inline(text: str) -> list[dict]:
-    nodes: list[dict] = []
-    for chunk in _MATH_SPLIT.split(text):
-        if not chunk:
-            continue
-        if len(chunk) > 2 and chunk[0] == chunk[-1] == "$":
-            nodes.append({"type": "inlineMathEquation", "attrs": {"math_equation": chunk[1:-1].strip()}})
+    formulas: list[str] = []
+    parts: list[str] = []
+    for index, chunk in enumerate(_MATH_SPLIT.split(text.replace("\ue000", "").replace("\ue001", ""))):
+        if index % 2 and chunk[0] == "$":
+            parts.append(f"\ue000{len(formulas)}\ue001")
+            formulas.append(chunk[1:-1].strip())
         else:
-            nodes.extend(_emphasis(chunk))
+            parts.append(chunk)
+    nodes: list[dict] = []
+    for node in _emphasis("".join(parts)):
+        if "\ue000" not in node["text"]:
+            nodes.append(node)
+            continue
+        for position, piece in enumerate(_HOLDER.split(node["text"])):
+            if position % 2:
+                nodes.append(
+                    {"type": "inlineMathEquation", "attrs": {"math_equation": formulas[int(piece)]}}
+                )
+            elif piece:
+                nodes.append({**node, "text": piece})
     return nodes
 
 

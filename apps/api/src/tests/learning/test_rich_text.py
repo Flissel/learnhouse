@@ -109,3 +109,23 @@ def test_dollar_in_code_stays_code() -> None:
     span = markdown_to_doc("Nutze `echo $HOME $x$` hier")["content"][0]
     assert [n["type"] for n in span["content"]] == ["text", "text", "text"]
     assert span["content"][1]["text"] == "echo $HOME $x$"
+
+
+def test_unmatched_dollar_chunks_are_not_read_as_math() -> None:
+    for text in ("$5 und $", r"\$5 und x$ danach $y$"):
+        para = markdown_to_doc(text)["content"][0]
+        math = [n["attrs"]["math_equation"] for n in para["content"] if n["type"] == "inlineMathEquation"]
+        assert math == ([] if text == "$5 und $" else ["y"]), text
+    assert markdown_to_doc("$5 und $")["content"][0]["content"][0]["text"] == "$5 und $"
+    escaped = markdown_to_doc(r"\$5 und x$ danach $y$")["content"][0]["content"]
+    assert escaped[0]["text"] == "$5 und x$ danach "
+
+
+def test_emphasis_spans_a_formula() -> None:
+    nodes = markdown_to_doc("**Satz $a^2$ gilt**")["content"][0]["content"]
+    assert [n["type"] for n in nodes] == ["text", "inlineMathEquation", "text"]
+    assert nodes[0] == {"type": "text", "text": "Satz ", "marks": [{"type": "bold"}]}
+    assert nodes[1]["attrs"] == {"math_equation": "a^2"}
+    assert nodes[2] == {"type": "text", "text": " gilt", "marks": [{"type": "bold"}]}
+    italic = markdown_to_doc("*mit $x_1$ hier*")["content"][0]["content"]
+    assert [n.get("marks") for n in italic] == [[{"type": "italic"}], None, [{"type": "italic"}]]
