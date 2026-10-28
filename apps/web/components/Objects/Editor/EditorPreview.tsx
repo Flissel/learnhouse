@@ -13,6 +13,7 @@ import Youtube from '@tiptap/extension-youtube'
 import VideoBlock from './Extensions/Video/VideoBlock'
 import AudioBlock from './Extensions/Audio/AudioBlock'
 import MathEquationBlock from './Extensions/MathEquation/MathEquationBlock'
+import InlineMathEquation from './Extensions/MathEquation/InlineMathEquation'
 import PDFBlock from './Extensions/PDF/PDFBlock'
 import H5PBlock from './Extensions/H5P/H5PBlock'
 import LibraryBlock from './Extensions/Library/LibraryBlock'
@@ -84,6 +85,7 @@ function EditorPreview({ content, activity }: EditorPreviewProps) {
         editable: false,
         activity: activity,
       }),
+      InlineMathEquation,
       PDFBlock.configure({
         editable: false,
         activity: activity,

@@ -31,6 +31,7 @@ import VideoBlock from './Extensions/Video/VideoBlock'
 import AudioBlock from './Extensions/Audio/AudioBlock'
 import { Eye, Monitor, History, AlertTriangle, RefreshCw, Loader2 } from 'lucide-react'
 import MathEquationBlock from './Extensions/MathEquation/MathEquationBlock'
+import InlineMathEquation from './Extensions/MathEquation/InlineMathEquation'
 import PDFBlock from './Extensions/PDF/PDFBlock'
 import H5PBlock from './Extensions/H5P/H5PBlock'
 import LibraryBlock from './Extensions/Library/LibraryBlock'
@@ -174,6 +175,7 @@ function Editor(props: EditorProps) {
       VideoBlock.configure({ editable: true, activity: stableActivity, orgUuid: props.org?.org_uuid, courseUuid: props.course?.course_uuid }),
       AudioBlock.configure({ editable: true, activity: stableActivity }),
       MathEquationBlock.configure({ editable: true, activity: stableActivity }),
+      InlineMathEquation,
       PDFBlock.configure({ editable: true, activity: stableActivity }),
       H5PBlock.configure({ editable: true, activity: stableActivity }),
       LibraryBlock.configure({ editable: true, activity: stableActivity }),

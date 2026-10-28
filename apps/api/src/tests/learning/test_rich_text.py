@@ -64,3 +64,48 @@ def test_a_lesson_page_ends_with_its_key_facts() -> None:
     assert doc["content"][1]["content"][0]["text"] == "Das Wichtigste in Kürze"
     assert len(doc["content"][2]["content"]) == 2
     assert lesson_doc("Nur Text.", [])["content"] == markdown_to_doc("Nur Text.")["content"]
+
+
+def test_display_formula_paragraph_becomes_block_math() -> None:
+    doc = markdown_to_doc("$$f(x)=x^2$$")
+    assert doc["content"] == [{"type": "blockMathEquation", "attrs": {"math_equation": "f(x)=x^2"}}]
+    multi = markdown_to_doc("$$\n\\frac{a}{b}\n= c\n$$")
+    assert multi["content"][0]["type"] == "blockMathEquation"
+    assert multi["content"][0]["attrs"]["math_equation"] == "\\frac{a}{b} = c"
+
+
+def test_inline_formula_sits_between_text_and_marks() -> None:
+    para = markdown_to_doc("Die Ableitung $f'(x)$ ist **wichtig**.")["content"][0]
+    kinds = [n["type"] for n in para["content"]]
+    assert kinds == ["text", "inlineMathEquation", "text", "text", "text"]
+    assert para["content"][1]["attrs"] == {"math_equation": "f'(x)"}
+    assert para["content"][3]["marks"] == [{"type": "bold"}]
+
+
+def test_underscores_in_formulas_are_not_italic() -> None:
+    para = markdown_to_doc("Mit $a_1$ und $b_2$ rechnen.")["content"][0]
+    formulas = [n["attrs"]["math_equation"] for n in para["content"] if n["type"] == "inlineMathEquation"]
+    assert formulas == ["a_1", "b_2"]
+    assert all("marks" not in n for n in para["content"])
+
+
+def test_currency_and_unclosed_dollar_stay_text() -> None:
+    for text in ("Kostet 5 $ heute", "Es kostet $5 und $6.", "Offen $x ohne Ende"):
+        para = markdown_to_doc(text)["content"][0]
+        assert [n["type"] for n in para["content"]] == ["text"], text
+        assert para["content"][0]["text"] == text
+
+
+def test_escaped_dollar_is_a_literal_dollar() -> None:
+    para = markdown_to_doc(r"Preis \$5 und \$6")["content"][0]
+    assert [n["type"] for n in para["content"]] == ["text"]
+    assert para["content"][0]["text"] == "Preis $5 und $6"
+
+
+def test_dollar_in_code_stays_code() -> None:
+    fenced = markdown_to_doc("```\n$$x$$ und $y$\n```")["content"][0]
+    assert fenced["type"] == "codeBlock"
+    assert fenced["content"][0]["text"] == "$$x$$ und $y$"
+    span = markdown_to_doc("Nutze `echo $HOME $x$` hier")["content"][0]
+    assert [n["type"] for n in span["content"]] == ["text", "text", "text"]
+    assert span["content"][1]["text"] == "echo $HOME $x$"

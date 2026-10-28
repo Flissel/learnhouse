@@ -6,7 +6,9 @@ configured". A ``SUBTYPE_DYNAMIC_PAGE`` document renders in the page editor and
 can later carry quiz, video and checkpoint blocks.
 
 Only the Markdown the course factory writes is supported: headings, paragraphs,
-bullet and numbered lists, block quotes, fenced code blocks, and **bold**, *italic*, `code`.
+bullet and numbered lists, block quotes, fenced code blocks, and **bold**, *italic*, `code`,
+plus formulas: ``$...$`` in a sentence and a paragraph of only ``$$...$$`` (rendered by KaTeX).
+A lone or currency ``$`` stays text, ``\\$`` is a literal dollar sign.
 Anything else stays literal text, never raw HTML.
 """
 
@@ -21,9 +23,25 @@ _QUOTE = re.compile(r"^\s*>\s?(.*)$")
 _FENCE = re.compile(r"^\s*```\s*([A-Za-z0-9_+-]*)\s*$")
 _KEY_FACTS = "Das Wichtigste in Kürze"
 _INLINE = re.compile(r"(\*\*[^*]+\*\*|__[^_]+__|`[^`]+`|\*[^*\s][^*]*\*|_[^_\s][^_]*_)")
+# `code` spans first (so a ``$`` in code stays code), then ``$formula$``: the opener is not
+# followed by a space, the closer is not preceded by one nor followed by a digit ("5 $ and 6 $").
+_MATH_SPLIT = re.compile(r"(`[^`]+`|(?<![\$])\$(?![\s$])[^$\n]+?(?<![\s\\])\$(?![\d$]))")
+_BLOCK_MATH = re.compile(r"^\$\$\s*(.+?)\s*\$\$$")
 
 
 def _inline(text: str) -> list[dict]:
+    nodes: list[dict] = []
+    for chunk in _MATH_SPLIT.split(text):
+        if not chunk:
+            continue
+        if len(chunk) > 2 and chunk[0] == chunk[-1] == "$":
+            nodes.append({"type": "inlineMathEquation", "attrs": {"math_equation": chunk[1:-1].strip()}})
+        else:
+            nodes.extend(_emphasis(chunk))
+    return nodes
+
+
+def _emphasis(text: str) -> list[dict]:
     nodes: list[dict] = []
     for part in _INLINE.split(text):
         if not part:
@@ -37,6 +55,8 @@ def _inline(text: str) -> list[dict]:
             part, mark = part[1:-1], "code"
         elif len(part) > 2 and part[0] in "*_" and part[-1] == part[0]:
             part, mark = part[1:-1], "italic"
+        if mark != "code":
+            part = part.replace("\\$", "$")
         node: dict = {"type": "text", "text": part}
         if mark:
             node["marks"] = [{"type": mark}]
@@ -45,6 +65,8 @@ def _inline(text: str) -> list[dict]:
 
 
 def _paragraph(text: str) -> dict:
+    if (block := _BLOCK_MATH.match(text.strip())) and "$$" not in block.group(1):
+        return {"type": "blockMathEquation", "attrs": {"math_equation": block.group(1)}}
     content = _inline(text.strip())
     return {"type": "paragraph", "content": content} if content else {"type": "paragraph"}
 
