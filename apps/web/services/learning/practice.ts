@@ -54,6 +54,7 @@ export type PracticeAnswer =
   | { text: string }
   | { order: string[] }
   | { pairs: Record<string, string> }
+  | { value: number }
 
 async function call<T = PracticeReply>(path: string, method: 'GET' | 'POST' | 'PATCH', token: string | undefined, body?: unknown): Promise<T> {
   const response = await secureFetch(

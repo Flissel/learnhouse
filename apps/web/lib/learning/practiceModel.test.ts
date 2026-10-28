@@ -1,7 +1,7 @@
 // @ts-expect-error Bun supplies this runtime module; the web tsconfig intentionally omits Bun globals.
 import { describe, expect, test } from 'bun:test'
 
-import { imageFallback, practiceModel } from './practiceModel'
+import { imageFallback, parseNumber, practiceModel } from './practiceModel'
 import type { PracticeTurn } from '@/services/learning/practice'
 
 const ref = JSON.stringify({ locator: { heading: 'Vor der Arbeit' }, content: 'Vor jedem Einsatz prüfen.' })
@@ -112,5 +112,37 @@ describe('practiceTask for hands-on items', () => {
     const model = practiceModel(turn({ task: { ...base, type: 'matching', presentation } }), { mode: 'training' })
     expect((model.task as any).left[0].image).toEqual({ src: 'http://h/lernsequenz-medien/term-a.png', width: 560, height: 96 })
     expect((model.task as any).left[1].image).toBeUndefined()
+  })
+})
+
+describe('numeric tasks', () => {
+  test('maps a numeric engine task with its unit', () => {
+    const model = practiceModel(
+      turn({ task: { id: 't2', type: 'numeric', prompt: 'Lösen Sie $2x=4$.', options: [], source_refs: [ref], presentation: { unit: 'x =' } } }),
+      { mode: 'training' },
+    )
+    expect(model.task).toMatchObject({ type: 'numeric', unit: 'x =' })
+  })
+
+  test('numeric task without unit has none', () => {
+    const model = practiceModel(
+      turn({ task: { id: 't2', type: 'numeric', prompt: 'p', options: [], source_refs: [ref] } }),
+      { mode: 'training' },
+    )
+    expect((model.task as any).unit).toBeUndefined()
+  })
+})
+
+describe('parseNumber', () => {
+  test('accepts comma, spaces and exponent', () => {
+    expect(parseNumber('-1,5')).toBe(-1.5)
+    expect(parseNumber(' 2 ')).toBe(2)
+    expect(parseNumber('1e3')).toBe(1000)
+  })
+  test('rejects nonsense', () => {
+    expect(parseNumber('zwei')).toBeNull()
+    expect(parseNumber('')).toBeNull()
+    expect(parseNumber('1,2,3')).toBeNull()
+    expect(parseNumber('Infinity')).toBeNull()
   })
 })

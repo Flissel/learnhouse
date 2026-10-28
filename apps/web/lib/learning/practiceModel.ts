@@ -29,6 +29,10 @@ export function practiceTask(task: PracticeTask): LearningTask {
   if (task.type === 'matching') {
     return { ...base, type: 'matching', left: pairItems(task.presentation?.left), right: pairItems(task.presentation?.right) }
   }
+  if (task.type === 'numeric') {
+    const unit = typeof task.presentation?.unit === 'string' && task.presentation.unit ? task.presentation.unit : undefined
+    return unit ? { ...base, type: 'numeric', unit } : { ...base, type: 'numeric' }
+  }
   if (task.type === 'fill_in') {
     const template = typeof task.presentation?.template === 'string' ? task.presentation.template : '{{wert}}'
     const shell = typeof task.presentation?.shell === 'string' ? task.presentation.shell : undefined
@@ -42,6 +46,14 @@ export function practiceTask(task: PracticeTask): LearningTask {
     return { ...base, type: 'fill_in', template, shell }
   }
   return { ...base, type: 'open_response' }
+}
+
+/** A number as a learner types it: comma or point, spaces around, `1e3` allowed; otherwise null. */
+export function parseNumber(input: string): number | null {
+  const text = input.trim().replace(',', '.')
+  if (!/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(text)) return null
+  const value = Number(text)
+  return Number.isFinite(value) ? value : null
 }
 
 /** Whether a fill_in shows the text line instead of a drawn window (no usable picture). */

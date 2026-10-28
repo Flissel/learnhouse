@@ -1,5 +1,7 @@
 import { useState, type FormEvent } from 'react'
 
+import MathText from './MathText'
+import { parseNumber } from '@/lib/learning/practiceModel'
 import SourceEvidence, { type SourceEvidenceItem } from './SourceEvidence'
 
 interface TaskBase {
@@ -22,6 +24,7 @@ export type TaskAnswer =
   | { text: string }
   | { order: string[] }
   | { pairs: Record<string, string> }
+  | { value: number }
 
 export interface OrderingTask extends TaskBase {
   type: 'ordering'
@@ -62,6 +65,12 @@ export interface OpenResponseTask extends TaskBase {
   type: 'open_response' | 'case' | 'code'
 }
 
+export interface NumericTask extends TaskBase {
+  type: 'numeric'
+  // Label in front of the field, e.g. "x =".
+  unit?: string
+}
+
 export interface CanvasTask extends TaskBase {
   type: 'canvas'
   canvasHref?: string
@@ -69,7 +78,7 @@ export interface CanvasTask extends TaskBase {
   canvasUrl?: string
 }
 
-export type LearningTask = MultipleChoiceTask | OpenResponseTask | CanvasTask | OrderingTask | MatchingTask | FillInTask
+export type LearningTask = MultipleChoiceTask | OpenResponseTask | CanvasTask | OrderingTask | MatchingTask | FillInTask | NumericTask
 
 interface TaskRendererProps {
   task: LearningTask
@@ -88,6 +97,7 @@ export function answerFromForm(task: LearningTask, form: FormData): TaskAnswer {
   if (task.type === 'matching') {
     return { pairs: Object.fromEntries(task.left.map((item) => [item.id, String(form.get(`pair:${item.id}`) ?? '')])) }
   }
+  if (task.type === 'numeric') return { value: parseNumber(String(form.get('answer') ?? '')) ?? Number.NaN }
   return { text: String(form.get('answer') ?? '') }
 }
 
@@ -110,7 +120,7 @@ function OrderingField({ items }: { items: Array<{ id: string; label: string }> 
         <li className="flex items-center gap-3 rounded-md border border-zinc-200 px-3 py-2" key={id}>
           <input name="order" type="hidden" value={id} />
           <span className="w-6 text-sm font-semibold text-zinc-500">{index + 1}.</span>
-          <span className="min-w-0 flex-1 break-words text-sm text-zinc-900">{labels[id]}</span>
+          <span className="min-w-0 flex-1 break-words text-sm text-zinc-900"><MathText text={labels[id]} /></span>
           <button aria-label="Nach oben" className="h-11 w-11 rounded-md border border-zinc-300 text-base hover:bg-zinc-100 disabled:opacity-40" disabled={index === 0} onClick={() => move(index, -1)} type="button">↑</button>
           <button aria-label="Nach unten" className="h-11 w-11 rounded-md border border-zinc-300 text-base hover:bg-zinc-100 disabled:opacity-40" disabled={index === order.length - 1} onClick={() => move(index, 1)} type="button">↓</button>
         </li>
@@ -196,22 +206,55 @@ function FillInField({ template, shell }: { template: string; shell?: string }) 
               />
             )
           }
-          return <span key={index}>{part}</span>
+          return <span key={index}><MathText text={part} /></span>
         })}
       </pre>
     </div>
   )
 }
 
+/** A number field: comma or point, the unit label in front. Nonsense is not sent. */
+function NumericField({ unit, invalid, onEdit }: { unit?: string; invalid: boolean; onEdit: () => void }) {
+  return (
+    <div>
+      <label className="flex items-center gap-2">
+        {unit ? <span className="text-sm font-semibold text-zinc-900"><MathText text={unit} /></span> : null}
+        <input
+          aria-describedby={invalid ? 'answer-hint' : undefined}
+          aria-invalid={invalid}
+          aria-label="Zahl eingeben"
+          autoComplete="off"
+          className="h-11 w-40 rounded-md border border-zinc-300 px-3 text-sm text-zinc-950 focus:border-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+          id="answer"
+          inputMode="decimal"
+          name="answer"
+          onInput={onEdit}
+          required
+          spellCheck={false}
+          type="text"
+        />
+      </label>
+      {invalid ? <p className="mt-2 text-sm text-red-700" id="answer-hint" role="alert">Bitte eine Zahl eingeben, z. B. -1,5</p> : null}
+    </div>
+  )
+}
+
 export default function TaskRenderer({ task, submitLabel, onSubmit, onOpenCanvas, disabled }: TaskRendererProps) {
+  const [numberInvalid, setNumberInvalid] = useState(false)
+
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    onSubmit?.(answerFromForm(task, new FormData(event.currentTarget)))
+    const form = new FormData(event.currentTarget)
+    if (task.type === 'numeric' && parseNumber(String(form.get('answer') ?? '')) === null) {
+      setNumberInvalid(true)
+      return
+    }
+    onSubmit?.(answerFromForm(task, form))
   }
 
   return (
     <form className="min-w-0" onSubmit={submit}>
-      <h3 className="break-words text-lg font-semibold leading-7 text-zinc-950">{task.prompt}</h3>
+      <h3 className="break-words text-lg font-semibold leading-7 text-zinc-950"><MathText text={task.prompt} /></h3>
 
       <div className="mt-5">
         {task.type === 'multiple_choice' ? (
@@ -227,7 +270,7 @@ export default function TaskRenderer({ task, submitLabel, onSubmit, onOpenCanvas
                   type={task.multiple ? 'checkbox' : 'radio'}
                   value={option.id}
                 />
-                <span className="min-w-0 break-words text-sm text-zinc-900">{option.label}</span>
+                <span className="min-w-0 break-words text-sm text-zinc-900"><MathText text={option.label} /></span>
               </label>
             ))}
           </fieldset>
@@ -237,7 +280,7 @@ export default function TaskRenderer({ task, submitLabel, onSubmit, onOpenCanvas
           <div className="space-y-2">
             {task.left.map((item, index) => (
               <label className="flex flex-wrap items-center gap-3 rounded-md border border-zinc-200 px-3 py-2" key={item.id}>
-                <span className="min-w-[140px] flex-1 break-words text-sm font-semibold text-zinc-900">{item.label}</span>
+                <span className="min-w-[140px] flex-1 break-words text-sm font-semibold text-zinc-900"><MathText text={item.label} /></span>
                 {item.image ? (
                   // eslint-disable-next-line @next/next/no-img-element -- drawn window served by learning-api
                   <img alt={item.label} className="block h-auto w-full max-w-[560px] basis-full rounded-md border border-zinc-200" height={item.image.height} src={item.image.src} width={item.image.width} />
@@ -255,6 +298,8 @@ export default function TaskRenderer({ task, submitLabel, onSubmit, onOpenCanvas
               </label>
             ))}
           </div>
+        ) : task.type === 'numeric' ? (
+          <NumericField invalid={numberInvalid} onEdit={() => setNumberInvalid(false)} unit={task.unit} />
         ) : task.type === 'fill_in' ? (
           <FillInTaskField task={task} />
         ) : task.type === 'canvas' && task.canvasUrl ? (
