@@ -160,10 +160,10 @@ export default function LearningPlayer({
             <ShieldCheck aria-hidden="true" className="text-teal-700" size={17} />
             <h3 className="text-sm font-semibold text-zinc-950" id="feedback-title">Quellengebundenes Feedback</h3>
           </div>
-          <p className="mt-2 text-sm leading-6 text-zinc-700"><MathText text={model.feedback.message} /></p>
+          <p className="mt-2 text-sm leading-6 text-zinc-700"><MathText math={model.task?.math} text={model.feedback.message} /></p>
           {model.feedback.misconception ? (
             <p className="mt-2 border-s-4 border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-950">
-              Fehlvorstellung: <MathText text={model.feedback.misconception} />
+              Fehlvorstellung: <MathText math={model.task?.math} text={model.feedback.misconception} />
             </p>
           ) : null}
         </section>

@@ -4,11 +4,12 @@ import 'katex/dist/katex.min.css'
 
 import { splitMath, type MathPart } from './mathSplit'
 
-export { splitMath }
-
 /** Shows the raw source when KaTeX cannot set a formula. */
-class Fallback extends Component<{ raw: string; children: ReactNode }, { failed: boolean }> {
-  state = { failed: false }
+class Fallback extends Component<{ raw: string; children: ReactNode }, { failed: boolean; raw: string }> {
+  state = { failed: false, raw: this.props.raw }
+  static getDerivedStateFromProps(props: { raw: string }, state: { failed: boolean; raw: string }) {
+    return props.raw === state.raw ? null : { failed: false, raw: props.raw }
+  }
   static getDerivedStateFromError() {
     return { failed: true }
   }
@@ -29,8 +30,9 @@ function Part({ part }: { part: MathPart }) {
   )
 }
 
-/** Text with $…$ / $$…$$ formulas set by KaTeX; everything else stays plain text. */
-export default function MathText({ text }: { text: string }) {
+/** With `math`, $…$ / $$…$$ formulas are set by KaTeX; without it (e.g. Terminal course) the text stays plain. */
+export default function MathText({ text, math }: { text: string; math?: boolean }) {
+  if (!math) return <>{text}</>
   return (
     <>
       {splitMath(text).map((part, index) => <Part key={index} part={part} />)}

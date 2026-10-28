@@ -8,6 +8,8 @@ interface TaskBase {
   id: string
   prompt: string
   evidence: SourceEvidenceItem[]
+  // Set formulas ($…$) only for math-course items; the Terminal course stays plain text.
+  math?: boolean
 }
 
 export interface MultipleChoiceTask extends TaskBase {
@@ -88,7 +90,8 @@ interface TaskRendererProps {
   disabled?: boolean
 }
 
-export function answerFromForm(task: LearningTask, form: FormData): TaskAnswer {
+/** The answer of the form; null when a number field holds no valid number (nothing to send). */
+export function answerFromForm(task: LearningTask, form: FormData): TaskAnswer | null {
   if (task.type === 'multiple_choice') {
     const chosen = form.getAll('answer').map(String)
     return task.multiple ? { choice_ids: chosen } : { choice_id: chosen[0] ?? '' }
@@ -97,14 +100,17 @@ export function answerFromForm(task: LearningTask, form: FormData): TaskAnswer {
   if (task.type === 'matching') {
     return { pairs: Object.fromEntries(task.left.map((item) => [item.id, String(form.get(`pair:${item.id}`) ?? '')])) }
   }
-  if (task.type === 'numeric') return { value: parseNumber(String(form.get('answer') ?? '')) ?? Number.NaN }
+  if (task.type === 'numeric') {
+    const value = parseNumber(String(form.get('answer') ?? ''))
+    return value === null ? null : { value }
+  }
   return { text: String(form.get('answer') ?? '') }
 }
 
 const SHELL_NAMES: Record<string, string> = { powershell: 'Windows PowerShell', cmd: 'Windows CMD', unix: 'macOS / Linux' }
 
 /** The order as a list with up/down buttons; hidden inputs carry it in the form. */
-function OrderingField({ items }: { items: Array<{ id: string; label: string }> }) {
+function OrderingField({ items, math }: { items: Array<{ id: string; label: string }>; math?: boolean }) {
   const [order, setOrder] = useState(items.map((item) => item.id))
   const labels = Object.fromEntries(items.map((item) => [item.id, item.label]))
   const move = (index: number, delta: number) => {
@@ -120,7 +126,7 @@ function OrderingField({ items }: { items: Array<{ id: string; label: string }> 
         <li className="flex items-center gap-3 rounded-md border border-zinc-200 px-3 py-2" key={id}>
           <input name="order" type="hidden" value={id} />
           <span className="w-6 text-sm font-semibold text-zinc-500">{index + 1}.</span>
-          <span className="min-w-0 flex-1 break-words text-sm text-zinc-900"><MathText text={labels[id]} /></span>
+          <span className="min-w-0 flex-1 break-words text-sm text-zinc-900"><MathText math={math} text={labels[id]} /></span>
           <button aria-label="Nach oben" className="h-11 w-11 rounded-md border border-zinc-300 text-base hover:bg-zinc-100 disabled:opacity-40" disabled={index === 0} onClick={() => move(index, -1)} type="button">↑</button>
           <button aria-label="Nach unten" className="h-11 w-11 rounded-md border border-zinc-300 text-base hover:bg-zinc-100 disabled:opacity-40" disabled={index === order.length - 1} onClick={() => move(index, 1)} type="button">↓</button>
         </li>
@@ -142,7 +148,7 @@ const percent = (r: Box, image: Picture) => ({
 function FillInTaskField({ task }: { task: FillInTask }) {
   const [broken, setBroken] = useState(false)
   if (task.image && !broken) return <ImageFillInField image={task.image} onBroken={() => setBroken(true)} shell={task.shell} />
-  return <FillInField shell={task.shell} template={task.template} />
+  return <FillInField math={task.math} shell={task.shell} template={task.template} />
 }
 
 function ImageFillInField({ image, shell, onBroken }: { image: Picture & { rect: Box; more: Box[] }; shell?: string; onBroken: () => void }) {
@@ -181,7 +187,7 @@ function ImageFillInField({ image, shell, onBroken }: { image: Picture & { rect:
   )
 }
 
-function FillInField({ template, shell }: { template: string; shell?: string }) {
+function FillInField({ template, shell, math }: { template: string; shell?: string; math?: boolean }) {
   const parts = template.split(/(\{\{\w+\}\})/).filter(Boolean)
   let placed = false
   return (
@@ -206,7 +212,7 @@ function FillInField({ template, shell }: { template: string; shell?: string }) 
               />
             )
           }
-          return <span key={index}><MathText text={part} /></span>
+          return <span key={index}><MathText math={math} text={part} /></span>
         })}
       </pre>
     </div>
@@ -214,11 +220,11 @@ function FillInField({ template, shell }: { template: string; shell?: string }) 
 }
 
 /** A number field: comma or point, the unit label in front. Nonsense is not sent. */
-function NumericField({ unit, invalid, onEdit }: { unit?: string; invalid: boolean; onEdit: () => void }) {
+function NumericField({ unit, invalid, onEdit, math }: { unit?: string; invalid: boolean; onEdit: () => void; math?: boolean }) {
   return (
     <div>
       <label className="flex items-center gap-2">
-        {unit ? <span className="text-sm font-semibold text-zinc-900"><MathText text={unit} /></span> : null}
+        {unit ? <span className="text-sm font-semibold text-zinc-900"><MathText math={math} text={unit} /></span> : null}
         <input
           aria-describedby={invalid ? 'answer-hint' : undefined}
           aria-invalid={invalid}
@@ -244,17 +250,17 @@ export default function TaskRenderer({ task, submitLabel, onSubmit, onOpenCanvas
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    if (task.type === 'numeric' && parseNumber(String(form.get('answer') ?? '')) === null) {
+    const answer = answerFromForm(task, new FormData(event.currentTarget))
+    if (!answer) {
       setNumberInvalid(true)
       return
     }
-    onSubmit?.(answerFromForm(task, form))
+    onSubmit?.(answer)
   }
 
   return (
     <form className="min-w-0" onSubmit={submit}>
-      <h3 className="break-words text-lg font-semibold leading-7 text-zinc-950"><MathText text={task.prompt} /></h3>
+      <h3 className="break-words text-lg font-semibold leading-7 text-zinc-950"><MathText math={task.math} text={task.prompt} /></h3>
 
       <div className="mt-5">
         {task.type === 'multiple_choice' ? (
@@ -270,17 +276,17 @@ export default function TaskRenderer({ task, submitLabel, onSubmit, onOpenCanvas
                   type={task.multiple ? 'checkbox' : 'radio'}
                   value={option.id}
                 />
-                <span className="min-w-0 break-words text-sm text-zinc-900"><MathText text={option.label} /></span>
+                <span className="min-w-0 break-words text-sm text-zinc-900"><MathText math={task.math} text={option.label} /></span>
               </label>
             ))}
           </fieldset>
         ) : task.type === 'ordering' ? (
-          <OrderingField items={task.items} />
+          <OrderingField items={task.items} math={task.math} />
         ) : task.type === 'matching' ? (
           <div className="space-y-2">
             {task.left.map((item, index) => (
               <label className="flex flex-wrap items-center gap-3 rounded-md border border-zinc-200 px-3 py-2" key={item.id}>
-                <span className="min-w-[140px] flex-1 break-words text-sm font-semibold text-zinc-900"><MathText text={item.label} /></span>
+                <span className="min-w-[140px] flex-1 break-words text-sm font-semibold text-zinc-900"><MathText math={task.math} text={item.label} /></span>
                 {item.image ? (
                   // eslint-disable-next-line @next/next/no-img-element -- drawn window served by learning-api
                   <img alt={item.label} className="block h-auto w-full max-w-[560px] basis-full rounded-md border border-zinc-200" height={item.image.height} src={item.image.src} width={item.image.width} />
@@ -299,7 +305,7 @@ export default function TaskRenderer({ task, submitLabel, onSubmit, onOpenCanvas
             ))}
           </div>
         ) : task.type === 'numeric' ? (
-          <NumericField invalid={numberInvalid} onEdit={() => setNumberInvalid(false)} unit={task.unit} />
+          <NumericField math={task.math} invalid={numberInvalid} onEdit={() => setNumberInvalid(false)} unit={task.unit} />
         ) : task.type === 'fill_in' ? (
           <FillInTaskField task={task} />
         ) : task.type === 'canvas' && task.canvasUrl ? (

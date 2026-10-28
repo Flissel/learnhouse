@@ -19,7 +19,7 @@ export function practiceTask(task: PracticeTask): LearningTask {
     const { title, locator } = evidenceTitle(ref)
     return { id: `source-${index}`, title, locator, supported: true }
   })
-  const base = { id: task.id, prompt: task.prompt, evidence }
+  const base = { id: task.id, prompt: task.prompt, evidence, math: task.presentation?.math === true }
   if (task.type === 'single_choice' || task.type === 'multiple_choice') {
     return { ...base, type: 'multiple_choice', options: task.options, multiple: task.type === 'multiple_choice' }
   }
@@ -50,7 +50,7 @@ export function practiceTask(task: PracticeTask): LearningTask {
 
 /** A number as a learner types it: comma or point, spaces around, `1e3` allowed; otherwise null. */
 export function parseNumber(input: string): number | null {
-  const text = input.trim().replace(',', '.')
+  const text = input.trim().replace(/\u2212/g, '-').replace(',', '.')
   if (!/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(text)) return null
   const value = Number(text)
   return Number.isFinite(value) ? value : null

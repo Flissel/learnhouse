@@ -1,7 +1,8 @@
 // @ts-expect-error Bun supplies this runtime module; the web tsconfig intentionally omits Bun globals.
 import { describe, expect, test } from 'bun:test'
 
-import { imageFallback, parseNumber, practiceModel } from './practiceModel'
+import { answerFromForm } from '@components/Learning/TaskRenderer'
+import { imageFallback, parseNumber, practiceModel, practiceTask } from './practiceModel'
 import type { PracticeTurn } from '@/services/learning/practice'
 
 const ref = JSON.stringify({ locator: { heading: 'Vor der Arbeit' }, content: 'Vor jedem Einsatz prüfen.' })
@@ -138,11 +139,54 @@ describe('parseNumber', () => {
     expect(parseNumber('-1,5')).toBe(-1.5)
     expect(parseNumber(' 2 ')).toBe(2)
     expect(parseNumber('1e3')).toBe(1000)
+    expect(parseNumber('\u22121,5')).toBe(-1.5)
   })
   test('rejects nonsense', () => {
     expect(parseNumber('zwei')).toBeNull()
     expect(parseNumber('')).toBeNull()
     expect(parseNumber('1,2,3')).toBeNull()
     expect(parseNumber('Infinity')).toBeNull()
+    expect(parseNumber('NaN')).toBeNull()
+    expect(parseNumber('0x10')).toBeNull()
+    expect(parseNumber('1.000,5')).toBeNull()
+  })
+})
+
+const base = { id: 't', prompt: 'p', options: [], source_refs: [ref] }
+
+describe('math opt-in', () => {
+  test('Terminal strings stay plain: math is false without presentation.math', () => {
+    const template = '$currentPath;$env:USERPROFILE\\.local\\bin {{wert}}'
+    const fill = practiceTask({ ...base, type: 'fill_in', presentation: { template } })
+    expect(fill.math).toBe(false)
+    expect((fill as any).template).toBe(template)
+    const label = 'export PATH="$HOME/.local/bin:$PATH"'
+    const opt = practiceTask({ ...base, type: 'single_choice', options: [{ id: 'a', label }] })
+    expect(opt.math).toBe(false)
+    expect((opt as any).options[0].label).toBe(label)
+  })
+
+  test('math is true only for presentation.math === true', () => {
+    expect(practiceTask({ ...base, type: 'numeric', presentation: { math: true } }).math).toBe(true)
+    for (const v of ['true', 1, false, null]) {
+      expect(practiceTask({ ...base, type: 'numeric', presentation: { math: v } }).math).toBe(false)
+    }
+    expect(practiceTask({ ...base, type: 'numeric' }).math).toBe(false)
+  })
+
+  test('the player model carries the flag for feedback', () => {
+    expect(practiceModel(turn(), { mode: 'training' }).task?.math).toBe(false)
+  })
+})
+
+describe('answerFromForm numeric', () => {
+  const task = practiceTask({ ...base, type: 'numeric' })
+  const form = (v: string) => { const f = new FormData(); f.set('answer', v); return f }
+  test('valid input gives a number', () => {
+    expect(answerFromForm(task, form('-1,5'))).toEqual({ value: -1.5 })
+  })
+  test('invalid input gives no answer', () => {
+    expect(answerFromForm(task, form('zwei'))).toBeNull()
+    expect(answerFromForm(task, form(''))).toBeNull()
   })
 })
