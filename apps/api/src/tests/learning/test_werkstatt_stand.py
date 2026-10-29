@@ -509,3 +509,54 @@ async def test_rollback_auch_am_versionslimit(db, monkeypatch) -> None:
     state = (await db.execute(select(LearningCourseState))).scalars().first()
     await db.refresh(state)
     assert state.revision == rev and "werkstatt_freigaben" not in (state.source_metadata or {})
+
+
+def _types(node) -> list[str]:
+    found: list[str] = []
+    if isinstance(node, dict):
+        if "type" in node:
+            found.append(node["type"])
+        for value in node.values():
+            found += _types(value)
+    elif isinstance(node, list):
+        for value in node:
+            found += _types(value)
+    return found
+
+
+@pytest.mark.asyncio
+async def test_formeln_nur_mit_math(db, monkeypatch) -> None:
+    # Ruling 6: Learning sends `math: true` for math courses only; Terminal text stays as before.
+    _enable_local_mode(monkeypatch)
+    terminal = "Mit $env:Path;$env:USERPROFILE arbeiten."
+    async with _mounted_learning_client(db) as client:
+        course_id, rev = await _published_course(client)
+        ohne = await client.put(
+            _url(course_id), headers=H,
+            json=_stand(rev, "f1", _foundations(
+                _lektion("lesson-authority", "Autoritaet", terminal), _aufgabe("t-1", "T", "Was zeigt $env:Path;$x$?"),
+            )),
+        )
+        assert ohne.status_code == 200, ohne.text
+        lektion = next(a for a in await _activities(db) if (a.extra_metadata or {}).get("werkstatt_key") == "lesson-authority")
+        assert "inlineMathEquation" not in _types(lektion.content)
+        assert lektion.content["content"][0]["content"] == [{"type": "text", "text": terminal}]
+        # A body with `math: false` is the very same release as one without the field.
+        wieder = await client.put(
+            _url(course_id), headers=H,
+            json={**_stand(rev, "f1", _foundations(
+                _lektion("lesson-authority", "Autoritaet", terminal), _aufgabe("t-1", "T", "Was zeigt $env:Path;$x$?"),
+            )), "math": False},
+        )
+        assert wieder.status_code == 200, wieder.text
+        mit = await client.put(
+            _url(course_id), headers=H,
+            json={**_stand(rev + 1, "f2", _foundations(
+                _lektion("lesson-authority", "Autoritaet", "Es gilt\n$$f'(x)=3x^2$$\nund $x^2$."),
+                _aufgabe("t-1", "T", "Was ist $f(1)$?"),
+            )), "math": True},
+        )
+    assert mit.status_code == 200, mit.text
+    by_key = {(a.extra_metadata or {}).get("werkstatt_key"): a for a in await _activities(db)}
+    assert "blockMathEquation" in _types(by_key["lesson-authority"].content)
+    assert "inlineMathEquation" in _types(by_key["t-1"].content)

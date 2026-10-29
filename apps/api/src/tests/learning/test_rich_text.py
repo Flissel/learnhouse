@@ -66,16 +66,20 @@ def test_a_lesson_page_ends_with_its_key_facts() -> None:
     assert lesson_doc("Nur Text.", [])["content"] == markdown_to_doc("Nur Text.")["content"]
 
 
+def _math(markdown: str) -> dict:
+    return markdown_to_doc(markdown, math=True)
+
+
 def test_display_formula_paragraph_becomes_block_math() -> None:
-    doc = markdown_to_doc("$$f(x)=x^2$$")
+    doc = _math("$$f(x)=x^2$$")
     assert doc["content"] == [{"type": "blockMathEquation", "attrs": {"math_equation": "f(x)=x^2"}}]
-    multi = markdown_to_doc("$$\n\\frac{a}{b}\n= c\n$$")
+    multi = _math("$$\n\\frac{a}{b}\n= c\n$$")
     assert multi["content"][0]["type"] == "blockMathEquation"
     assert multi["content"][0]["attrs"]["math_equation"] == "\\frac{a}{b} = c"
 
 
 def test_inline_formula_sits_between_text_and_marks() -> None:
-    para = markdown_to_doc("Die Ableitung $f'(x)$ ist **wichtig**.")["content"][0]
+    para = _math("Die Ableitung $f'(x)$ ist **wichtig**.")["content"][0]
     kinds = [n["type"] for n in para["content"]]
     assert kinds == ["text", "inlineMathEquation", "text", "text", "text"]
     assert para["content"][1]["attrs"] == {"math_equation": "f'(x)"}
@@ -83,7 +87,7 @@ def test_inline_formula_sits_between_text_and_marks() -> None:
 
 
 def test_underscores_in_formulas_are_not_italic() -> None:
-    para = markdown_to_doc("Mit $a_1$ und $b_2$ rechnen.")["content"][0]
+    para = _math("Mit $a_1$ und $b_2$ rechnen.")["content"][0]
     formulas = [n["attrs"]["math_equation"] for n in para["content"] if n["type"] == "inlineMathEquation"]
     assert formulas == ["a_1", "b_2"]
     assert all("marks" not in n for n in para["content"])
@@ -91,41 +95,104 @@ def test_underscores_in_formulas_are_not_italic() -> None:
 
 def test_currency_and_unclosed_dollar_stay_text() -> None:
     for text in ("Kostet 5 $ heute", "Es kostet $5 und $6.", "Offen $x ohne Ende"):
-        para = markdown_to_doc(text)["content"][0]
+        para = _math(text)["content"][0]
         assert [n["type"] for n in para["content"]] == ["text"], text
         assert para["content"][0]["text"] == text
 
 
 def test_escaped_dollar_is_a_literal_dollar() -> None:
-    para = markdown_to_doc(r"Preis \$5 und \$6")["content"][0]
+    para = _math(r"Preis \$5 und \$6")["content"][0]
     assert [n["type"] for n in para["content"]] == ["text"]
     assert para["content"][0]["text"] == "Preis $5 und $6"
 
 
 def test_dollar_in_code_stays_code() -> None:
-    fenced = markdown_to_doc("```\n$$x$$ und $y$\n```")["content"][0]
+    fenced = _math("```\n$$x$$ und $y$\n```")["content"][0]
     assert fenced["type"] == "codeBlock"
     assert fenced["content"][0]["text"] == "$$x$$ und $y$"
-    span = markdown_to_doc("Nutze `echo $HOME $x$` hier")["content"][0]
+    span = _math("Nutze `echo $HOME $x$` hier")["content"][0]
     assert [n["type"] for n in span["content"]] == ["text", "text", "text"]
     assert span["content"][1]["text"] == "echo $HOME $x$"
 
 
 def test_unmatched_dollar_chunks_are_not_read_as_math() -> None:
     for text in ("$5 und $", r"\$5 und x$ danach $y$"):
-        para = markdown_to_doc(text)["content"][0]
+        para = _math(text)["content"][0]
         math = [n["attrs"]["math_equation"] for n in para["content"] if n["type"] == "inlineMathEquation"]
         assert math == ([] if text == "$5 und $" else ["y"]), text
-    assert markdown_to_doc("$5 und $")["content"][0]["content"][0]["text"] == "$5 und $"
-    escaped = markdown_to_doc(r"\$5 und x$ danach $y$")["content"][0]["content"]
+    assert _math("$5 und $")["content"][0]["content"][0]["text"] == "$5 und $"
+    escaped = _math(r"\$5 und x$ danach $y$")["content"][0]["content"]
     assert escaped[0]["text"] == "$5 und x$ danach "
 
 
 def test_emphasis_spans_a_formula() -> None:
-    nodes = markdown_to_doc("**Satz $a^2$ gilt**")["content"][0]["content"]
+    nodes = _math("**Satz $a^2$ gilt**")["content"][0]["content"]
     assert [n["type"] for n in nodes] == ["text", "inlineMathEquation", "text"]
     assert nodes[0] == {"type": "text", "text": "Satz ", "marks": [{"type": "bold"}]}
     assert nodes[1]["attrs"] == {"math_equation": "a^2"}
     assert nodes[2] == {"type": "text", "text": " gilt", "marks": [{"type": "bold"}]}
-    italic = markdown_to_doc("*mit $x_1$ hier*")["content"][0]["content"]
+    italic = _math("*mit $x_1$ hier*")["content"][0]["content"]
     assert [n.get("marks") for n in italic] == [[{"type": "italic"}], None, [{"type": "italic"}]]
+
+
+# Ruling 6: formula typesetting is opt-in. Without `math` every text is converted exactly as before
+# the math course (316d41d4); Terminal lessons carry `$env:Path;$env:USERPROFILE` and `\$`.
+_TERMINAL_MD = (
+    "Setzen Sie `$env:Path` und $env:Path;$env:USERPROFILE ein.\n\nPreis \\$5 und $HOME$ hier.\n\n"
+    "$$x$$\n\nlautet\n$$f(x)$$\nalso"
+)
+
+
+def test_without_math_the_converter_is_unchanged() -> None:
+    def text(value: str, mark: str | None = None) -> dict:
+        node: dict = {"type": "text", "text": value}
+        if mark:
+            node["marks"] = [{"type": mark}]
+        return node
+
+    assert markdown_to_doc(_TERMINAL_MD) == {"type": "doc", "content": [
+        {"type": "paragraph", "content": [
+            text("Setzen Sie "), text("$env:Path", "code"), text(" und $env:Path;$env:USERPROFILE ein."),
+        ]},
+        {"type": "paragraph", "content": [text("Preis \\$5 und $HOME$ hier.")]},
+        {"type": "paragraph", "content": [text("$$x$$")]},
+        {"type": "paragraph", "content": [text("lautet $$f(x)$$ also")]},
+    ]}
+    from src.services.learning.rich_text import lesson_doc
+
+    assert lesson_doc("Mit $env:Path; $x$ arbeiten.", ["Fakt $a$"]) == {"type": "doc", "content": [
+        {"type": "paragraph", "content": [text("Mit $env:Path; $x$ arbeiten.")]},
+        {"type": "heading", "attrs": {"level": 3}, "content": [text("Das Wichtigste in Kürze")]},
+        {"type": "bulletList", "content": [
+            {"type": "listItem", "content": [{"type": "paragraph", "content": [text("Fakt $a$")]}]},
+        ]},
+    ]}
+    assert task_doc("Was zeigt $env:Path;$env:USERPROFILE an?", "N")["content"][0] == {
+        "type": "heading", "attrs": {"level": 2}, "content": [text("Was zeigt $env:Path;$env:USERPROFILE an?")],
+    }
+
+
+def test_with_math_lesson_and_task_formulas_become_nodes() -> None:
+    from src.services.learning.rich_text import lesson_doc
+
+    lesson = lesson_doc("Mit $x^2$ rechnen.", ["Fakt $a$"], math=True)
+    assert lesson["content"][0]["content"][1] == {"type": "inlineMathEquation", "attrs": {"math_equation": "x^2"}}
+    fact = lesson["content"][2]["content"][0]["content"][0]["content"]
+    assert fact[1] == {"type": "inlineMathEquation", "attrs": {"math_equation": "a"}}
+    heading = task_doc("Was ist $f(1)$?", "N", math=True)["content"][0]["content"]
+    assert [n["type"] for n in heading] == ["text", "inlineMathEquation", "text"]
+
+
+# Ruling 7: a line of only `$$...$$` is its own block, also without blank lines around it.
+def test_display_formula_line_is_its_own_block_without_blank_lines() -> None:
+    doc = _math("Die Ableitung lautet\n$$f'(x)=3x^2$$\nalso gilt das.")
+    assert doc["content"] == [
+        {"type": "paragraph", "content": [{"type": "text", "text": "Die Ableitung lautet"}]},
+        {"type": "blockMathEquation", "attrs": {"math_equation": "f'(x)=3x^2"}},
+        {"type": "paragraph", "content": [{"type": "text", "text": "also gilt das."}]},
+    ]
+    multi = _math("Es gilt\n$$\n\\frac{a}{b}\n= c\n$$\nfertig")
+    assert [b["type"] for b in multi["content"]] == ["paragraph", "blockMathEquation", "paragraph"]
+    assert multi["content"][1]["attrs"]["math_equation"] == "\\frac{a}{b} = c"
+    listed = _math("- Punkt eins\n$$y=1$$\n- Punkt zwei")
+    assert [b["type"] for b in listed["content"]] == ["bulletList", "blockMathEquation", "bulletList"]

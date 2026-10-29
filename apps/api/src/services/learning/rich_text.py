@@ -7,8 +7,10 @@ can later carry quiz, video and checkpoint blocks.
 
 Only the Markdown the course factory writes is supported: headings, paragraphs,
 bullet and numbered lists, block quotes, fenced code blocks, and **bold**, *italic*, `code`,
-plus formulas: ``$...$`` in a sentence and a paragraph of only ``$$...$$`` (rendered by KaTeX).
-A lone or currency ``$`` stays text, ``\\$`` is a literal dollar sign.
+plus, only with ``math=True`` (math courses), formulas: ``$...$`` in a sentence and ``$$...$$``
+on its own line(s) (rendered by KaTeX). A lone or currency ``$`` stays text, ``\\$`` is a literal
+dollar sign. Without ``math`` the output is exactly that of the converter before formulas, so
+Terminal lessons keep ``$env:Path`` and ``$HOME`` as text.
 Anything else stays literal text, never raw HTML.
 """
 
@@ -32,7 +34,9 @@ _BLOCK_MATH = re.compile(r"^\$\$\s*(.+?)\s*\$\$$")
 _HOLDER = re.compile("\ue000(\\d+)\ue001")
 
 
-def _inline(text: str) -> list[dict]:
+def _inline(text: str, math: bool = False) -> list[dict]:
+    if not math:
+        return _emphasis(text, unescape=False)
     formulas: list[str] = []
     parts: list[str] = []
     for index, chunk in enumerate(_MATH_SPLIT.split(text.replace("\ue000", "").replace("\ue001", ""))):
@@ -56,7 +60,7 @@ def _inline(text: str) -> list[dict]:
     return nodes
 
 
-def _emphasis(text: str) -> list[dict]:
+def _emphasis(text: str, unescape: bool = True) -> list[dict]:
     nodes: list[dict] = []
     for part in _INLINE.split(text):
         if not part:
@@ -70,7 +74,7 @@ def _emphasis(text: str) -> list[dict]:
             part, mark = part[1:-1], "code"
         elif len(part) > 2 and part[0] in "*_" and part[-1] == part[0]:
             part, mark = part[1:-1], "italic"
-        if mark != "code":
+        if unescape and mark != "code":
             part = part.replace("\\$", "$")
         node: dict = {"type": "text", "text": part}
         if mark:
@@ -79,22 +83,28 @@ def _emphasis(text: str) -> list[dict]:
     return nodes
 
 
-def _paragraph(text: str) -> dict:
+def _display(text: str) -> dict | None:
     if (block := _BLOCK_MATH.match(text.strip())) and "$$" not in block.group(1):
         return {"type": "blockMathEquation", "attrs": {"math_equation": block.group(1)}}
-    content = _inline(text.strip())
+    return None
+
+
+def _paragraph(text: str, math: bool = False) -> dict:
+    if math and (block := _display(text)):
+        return block
+    content = _inline(text.strip(), math)
     return {"type": "paragraph", "content": content} if content else {"type": "paragraph"}
 
 
-def _list(kind: str, items: list[str]) -> dict:
+def _list(kind: str, items: list[str], math: bool = False) -> dict:
     return {
         "type": kind,
-        "content": [{"type": "listItem", "content": [_paragraph(item)]} for item in items],
+        "content": [{"type": "listItem", "content": [_paragraph(item, math)]} for item in items],
     }
 
 
-def markdown_to_doc(markdown: str) -> dict:
-    """Convert factory Markdown to a page document."""
+def markdown_to_doc(markdown: str, math: bool = False) -> dict:
+    """Convert factory Markdown to a page document; ``math`` typesets formulas."""
     blocks: list[dict] = []
     paragraph: list[str] = []
     items: list[str] = []
@@ -102,6 +112,8 @@ def markdown_to_doc(markdown: str) -> dict:
     quote: list[str] = []
     code: list[str] | None = None
     language: str | None = None
+    # Lines of a display formula spread over several lines, from ``$$`` to ``$$`` (math only).
+    display: list[str] | None = None
 
     def code_block() -> dict:
         text = "\n".join(code or [])
@@ -113,14 +125,14 @@ def markdown_to_doc(markdown: str) -> dict:
     def flush() -> None:
         nonlocal list_kind
         if paragraph:
-            blocks.append(_paragraph(" ".join(paragraph)))
+            blocks.append(_paragraph(" ".join(paragraph), math))
             paragraph.clear()
         if items:
-            blocks.append(_list(list_kind, list(items)))
+            blocks.append(_list(list_kind, list(items), math))
             items.clear()
             list_kind = ""
         if quote:
-            blocks.append({"type": "blockquote", "content": [_paragraph(" ".join(quote))]})
+            blocks.append({"type": "blockquote", "content": [_paragraph(" ".join(quote), math)]})
             quote.clear()
 
     for raw in (markdown or "").replace("\r\n", "\n").split("\n"):
@@ -138,14 +150,36 @@ def markdown_to_doc(markdown: str) -> dict:
             flush()
             code, language = [], fence.group(1) or None
             continue
-        if not line.strip():
+        stripped = line.strip()
+        if display is not None:
+            if not stripped:  # never closed: the lines stay text
+                blocks.append(_paragraph(" ".join(display), math))
+                display = None
+                continue
+            display.append(stripped)
+            if stripped.endswith("$$"):
+                joined = " ".join(display)
+                blocks.append(_display(joined) or _paragraph(joined, math))
+                display = None
+            continue
+        if math and stripped.startswith("$$"):
+            # Ruling 7: a display formula on its own line(s) is its own block, blank lines or not.
+            if block := _display(stripped):
+                flush()
+                blocks.append(block)
+                continue
+            if stripped == "$$" or not stripped.endswith("$$"):
+                flush()
+                display = [stripped]
+                continue
+        if not stripped:
             flush()
             continue
         if heading := _HEADING.match(line):
             flush()
             level = min(len(heading.group(1)), 4)
             blocks.append(
-                {"type": "heading", "attrs": {"level": level}, "content": _inline(heading.group(2))}
+                {"type": "heading", "attrs": {"level": level}, "content": _inline(heading.group(2), math)}
             )
             continue
         bullet, numbered = _BULLET.match(line), _NUMBERED.match(line)
@@ -169,30 +203,32 @@ def markdown_to_doc(markdown: str) -> dict:
             flush()
         paragraph.append(line.strip())
     flush()
+    if display is not None:
+        blocks.append(_paragraph(" ".join(display), math))
     if code is not None:
         blocks.append(code_block())
     return {"type": "doc", "content": blocks or [{"type": "paragraph"}]}
 
 
-def lesson_doc(markdown: str, key_facts: list[str]) -> dict:
+def lesson_doc(markdown: str, key_facts: list[str], math: bool = False) -> dict:
     """A lesson page: the lesson text, then its key facts (the factory's claims) as a list."""
-    doc = markdown_to_doc(markdown)
+    doc = markdown_to_doc(markdown, math)
     facts = [fact.strip() for fact in key_facts if fact.strip()]
     if facts:
         doc["content"] = [
             *doc["content"],
             {"type": "heading", "attrs": {"level": 3}, "content": [{"type": "text", "text": _KEY_FACTS}]},
-            _list("bulletList", facts),
+            _list("bulletList", facts, math),
         ]
     return doc
 
 
-def task_doc(prompt: str, note: str) -> dict:
+def task_doc(prompt: str, note: str, math: bool = False) -> dict:
     """A practice task shown as a page: the question and where it is answered."""
     return {
         "type": "doc",
         "content": [
-            {"type": "heading", "attrs": {"level": 2}, "content": _inline(prompt.strip())},
+            {"type": "heading", "attrs": {"level": 2}, "content": _inline(prompt.strip(), math)},
             {"type": "calloutInfo", "content": [{"type": "text", "text": note}]},
         ],
     }

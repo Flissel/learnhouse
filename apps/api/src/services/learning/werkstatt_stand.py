@@ -58,6 +58,9 @@ class WerkstattStandWrite(_Strict):
     entfernen: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(
         default_factory=list, max_length=5_000
     )
+    # Formula typesetting in the lesson and task pages; Learning sends it for math courses only.
+    # Without it the pages are converted exactly as before (Terminal lessons carry `$env:...`).
+    math: bool = False
 
 
 class WerkstattStandRead(_Strict):
@@ -67,16 +70,16 @@ class WerkstattStandRead(_Strict):
     unveroeffentlicht: int
 
 
-def _content_for(entry: WerkstattEintrag) -> dict:
+def _content_for(entry: WerkstattEintrag, math: bool = False) -> dict:
     if entry.art == "lesson":
         body = entry.markdown or ""
         return {
-            **lesson_doc(body, entry.claims),
+            **lesson_doc(body, entry.claims, math),
             "markdown": body,
             "claims": [{"text": claim} for claim in entry.claims],
         }
     prompt = entry.prompt or entry.titel
-    return {**task_doc(prompt, _TASK_NOTE), "prompt": prompt}
+    return {**task_doc(prompt, _TASK_NOTE, math), "prompt": prompt}
 
 
 def _with_kept_embeds(old: dict | None, new: dict) -> dict:
@@ -97,11 +100,13 @@ def _key_of(activity: Activity) -> str | None:
 
 
 def _body_hash(payload: WerkstattStandWrite) -> str:
-    """Canonical hash of the request; an empty `entfernen` is left out, so a body without
-    the field and one with an empty list are the same release."""
+    """Canonical hash of the request; an empty `entfernen` and a false `math` are left out, so a
+    body without the field and one with its default are the same release."""
     body = payload.model_dump(mode="json")
     if not body["entfernen"]:
         del body["entfernen"]
+    if not body["math"]:
+        del body["math"]
     return hashlib.sha256(
         json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
     ).hexdigest()
@@ -234,7 +239,7 @@ async def _apply(
         ordered: list[ChapterActivity] = []
         for entry in kapitel.eintraege:
             seen.add(entry.key)
-            content = _content_for(entry)
+            content = _content_for(entry, payload.math)
             activity = by_key.get(entry.key)
             if activity is not None:
                 new_content = _with_kept_embeds(activity.content, content)
