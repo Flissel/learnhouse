@@ -435,11 +435,11 @@ async def test_fehler_mitten_drin_rollt_alles_zurueck(db, monkeypatch) -> None:
     real = stand_module._content_for
     calls = {"n": 0}
 
-    def flaky(entry):
+    def flaky(entry, *args):
         calls["n"] += 1
         if calls["n"] == 2:
             raise RuntimeError("erzwungener Fehler")
-        return real(entry)
+        return real(entry, *args)
 
     async with _mounted_learning_client(db) as client:
         course_id, rev = await _published_course(client)
@@ -478,11 +478,11 @@ async def test_rollback_auch_am_versionslimit(db, monkeypatch) -> None:
     real = stand_module._content_for
     calls = {"n": 0}
 
-    def flaky(entry):
+    def flaky(entry, *args):
         calls["n"] += 1
         if calls["n"] == 2:
             raise RuntimeError("erzwungener Fehler")
-        return real(entry)
+        return real(entry, *args)
 
     async with _mounted_learning_client(db) as client:
         course_id, rev = await _published_course(client)
