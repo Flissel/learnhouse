@@ -219,6 +219,26 @@ function FillInField({ template, shell, math }: { template: string; shell?: stri
   )
 }
 
+/**
+ * The right-hand side of a matching task as a visible list: its pictures (e.g. "Graph 1") and
+ * typeset labels. A `<select>` option can only show plain text, so the choice stays by label.
+ */
+function MatchingChoices({ options, math }: { options: MatchingTask['right']; math?: boolean }) {
+  return (
+    <ul aria-label="Zur Auswahl" className="grid gap-3 sm:grid-cols-2">
+      {options.map((option) => (
+        <li className="min-w-0 rounded-md border border-zinc-200 px-3 py-2" key={option.id}>
+          <span className="block break-words text-sm font-semibold text-zinc-900"><MathText math={math} text={option.label} /></span>
+          {option.image ? (
+            // eslint-disable-next-line @next/next/no-img-element -- drawn graph served by learning-api
+            <img alt={option.label} className="mt-2 block h-auto w-full max-w-[560px] rounded-md border border-zinc-200" height={option.image.height} src={option.image.src} width={option.image.width} />
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 /** A number field: comma or point, the unit label in front. Nonsense is not sent. */
 function NumericField({ unit, invalid, onEdit, math }: { unit?: string; invalid: boolean; onEdit: () => void; math?: boolean }) {
   return (
@@ -232,7 +252,8 @@ function NumericField({ unit, invalid, onEdit, math }: { unit?: string; invalid:
           autoComplete="off"
           className="h-11 w-40 rounded-md border border-zinc-300 px-3 text-sm text-zinc-950 focus:border-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-200"
           id="answer"
-          inputMode="decimal"
+          // Not "decimal": the iPhone's decimal pad has no minus key, so "-1,5" could not be typed.
+          inputMode="text"
           name="answer"
           onInput={onEdit}
           required
@@ -246,7 +267,10 @@ function NumericField({ unit, invalid, onEdit, math }: { unit?: string; invalid:
 }
 
 export default function TaskRenderer({ task, submitLabel, onSubmit, onOpenCanvas, disabled }: TaskRendererProps) {
-  const [numberInvalid, setNumberInvalid] = useState(false)
+  // The hint belongs to the task it was shown for: a new task starts without it.
+  const [invalidTaskId, setInvalidTaskId] = useState<string | null>(null)
+  const numberInvalid = invalidTaskId === task.id
+  const setNumberInvalid = (invalid: boolean) => setInvalidTaskId(invalid ? task.id : null)
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -284,6 +308,7 @@ export default function TaskRenderer({ task, submitLabel, onSubmit, onOpenCanvas
           <OrderingField items={task.items} math={task.math} />
         ) : task.type === 'matching' ? (
           <div className="space-y-2">
+            {task.math || task.right.some((option) => option.image) ? <MatchingChoices math={task.math} options={task.right} /> : null}
             {task.left.map((item, index) => (
               <label className="flex flex-wrap items-center gap-3 rounded-md border border-zinc-200 px-3 py-2" key={item.id}>
                 <span className="min-w-[140px] flex-1 break-words text-sm font-semibold text-zinc-900"><MathText math={task.math} text={item.label} /></span>

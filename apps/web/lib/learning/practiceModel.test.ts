@@ -114,6 +114,17 @@ describe('practiceTask for hands-on items', () => {
     expect((model.task as any).left[0].image).toEqual({ src: 'http://h/lernsequenz-medien/term-a.png', width: 560, height: 96 })
     expect((model.task as any).left[1].image).toBeUndefined()
   })
+
+  test('matching right items keep their graph picture', () => {
+    const presentation = {
+      left: [{ id: 'l1', label: 'Funktion A' }],
+      right: [{ id: 'r1', label: 'Graph 1', image: 'http://h/lernsequenz-medien/graph-1.png', width: 480, height: 320 }],
+    }
+    const model = practiceModel(turn({ task: { ...base, type: 'matching', presentation } }), { mode: 'training' })
+    expect((model.task as any).right[0]).toEqual({
+      id: 'r1', label: 'Graph 1', image: { src: 'http://h/lernsequenz-medien/graph-1.png', width: 480, height: 320 },
+    })
+  })
 })
 
 describe('numeric tasks', () => {
