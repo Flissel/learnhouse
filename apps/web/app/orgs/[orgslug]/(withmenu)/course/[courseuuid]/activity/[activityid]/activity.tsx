@@ -32,6 +32,7 @@ import ActivityChapterDropdown from '@components/Pages/Activity/ActivityChapterD
 import ActivityShareDropdown from '@components/Pages/Activity/ActivityShareDropdown'
 import FixedActivitySecondaryBar from '@components/Pages/Activity/FixedActivitySecondaryBar'
 import CourseEndView from '@components/Pages/Activity/CourseEndView'
+import CourseRating from '@components/Learning/CourseRating'
 import LessonLayout from '@components/Pages/Activity/LessonLayout'
 import { motion, AnimatePresence } from 'motion/react'
 import { Breadcrumbs } from '@components/Objects/Breadcrumbs/Breadcrumbs'
@@ -328,6 +329,9 @@ function ActivityClient(props: ActivityClientProps) {
               <ResourceActivity activity={activity} orgslug={orgslug} />
             </Suspense>
           );
+        }
+        if ((activity.details?.learning_kind ?? activity.extra_metadata?.learning_kind) === 'bewertung') {
+          return <CourseRating courseUuid={course?.course_uuid ?? ''} />;
         }
         return (
           <Suspense fallback={<LoadingFallback />}>

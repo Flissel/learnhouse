@@ -262,7 +262,7 @@ describe('answerFromForm numeric', () => {
   })
 
   test('learner-visible strings in the touched components avoid du-forms', () => {
-    const files = ['LearningPlayer.tsx', 'TaskRenderer.tsx', 'AgentPanel.tsx', 'SourceEvidence.tsx']
+    const files = ['LearningPlayer.tsx', 'TaskRenderer.tsx', 'AgentPanel.tsx', 'SourceEvidence.tsx', 'CourseRating.tsx']
       .map((f) => `components/Learning/${f}`).concat('components/Pages/Courses/CourseStart.tsx')
     for (const file of files) {
       const src = readFileSync(file, 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')

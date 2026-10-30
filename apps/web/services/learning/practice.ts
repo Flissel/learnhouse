@@ -118,6 +118,17 @@ export const listNotes = (token?: string) => call<{ notes: NoteRead[] }>('notes'
 export const setNoteText = (noteId: string, ownText: string, token?: string) =>
   call<NoteRead>(`notes/${encodeURIComponent(noteId)}`, 'PATCH', token, { own_text: ownText })
 
+export interface CourseRatingRead {
+  smiley: 'gut' | 'mittel' | 'schlecht'
+  stichworte: string[]
+}
+
+export const submitCourseRating = (courseId: string, smiley: 'gut' | 'mittel' | 'schlecht', stichworte: string[], token?: string) =>
+  call<CourseRatingRead>('course-rating', 'POST', token, { course_id: courseId, smiley, stichworte })
+
+export const getCourseRating = (courseId: string, token?: string) =>
+  call<CourseRatingRead | null>(`course-rating/${encodeURIComponent(courseId)}`, 'GET', token)
+
 export interface PlayerPerson {
   token: string
   /** The only origin the token may be attached to (the learning-api player); null = attach nowhere. */
