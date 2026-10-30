@@ -90,7 +90,7 @@ export default function AgentPanel({ course, state, visibleOnCompact, onAsk, tut
               </button>
             </form>
           ) : (
-            <p className="mt-2 text-sm text-zinc-600">Starte eine Lernsitzung, dann hilft Ihnen der Tutor bei der offenen Aufgabe.</p>
+            <p className="mt-2 text-sm text-zinc-600">Starten Sie eine Lernsitzung, dann hilft Ihnen der Tutor bei der offenen Aufgabe.</p>
           )}
           {tutor ? (
             <div className="mt-3 rounded-md bg-emerald-50 px-3 py-3 text-sm leading-6 text-zinc-800">

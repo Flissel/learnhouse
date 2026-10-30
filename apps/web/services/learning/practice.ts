@@ -159,13 +159,26 @@ export function hintText(value: unknown): string | undefined {
   return undefined
 }
 
+/** A source excerpt cut at a safe place: never inside a $…$ formula, at whitespace, with an ellipsis. */
+export function excerpt(content: string, max = 400): string {
+  if (content.length <= max) return content
+  let cut = content.slice(0, max)
+  const dollars = [...cut.matchAll(/(?<!\\)\$/g)]
+  if (dollars.length % 2 === 1) cut = cut.slice(0, dollars[dollars.length - 1].index)
+  else {
+    const space = cut.search(/\s\S*$/)
+    if (space > 0) cut = cut.slice(0, space)
+  }
+  return `${cut.trimEnd()}…`
+}
+
 /** Source refs are JSON with heading and text; the title is the heading. */
 export function evidenceTitle(ref: string): { title: string; locator?: string } {
   try {
     const parsed = JSON.parse(ref)
     const heading = parsed?.locator?.heading ?? parsed?.locator?.section
     const content = typeof parsed?.content === 'string' ? parsed.content : undefined
-    return { title: typeof heading === 'string' ? heading : 'Kursmaterial', locator: content?.slice(0, 400) }
+    return { title: typeof heading === 'string' ? heading : 'Kursmaterial', locator: content ? excerpt(content) : undefined }
   } catch {
     return { title: 'Kursmaterial' }
   }
