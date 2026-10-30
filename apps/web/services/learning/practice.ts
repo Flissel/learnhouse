@@ -73,7 +73,11 @@ async function call<T = PracticeReply>(path: string, method: 'GET' | 'POST' | 'P
   )
   const data = await response.json().catch(() => ({}))
   if (!response.ok) {
-    const detail = typeof data?.detail === 'string' ? data.detail : 'Die Übung ist gerade nicht erreichbar.'
+    const detail = typeof data?.detail === 'string'
+      ? data.detail
+      : typeof data?.detail?.message === 'string'
+        ? data.detail.message
+        : 'Die Übung ist gerade nicht erreichbar.'
     throw new Error(detail)
   }
   return data as T

@@ -261,3 +261,34 @@ def test_without_a_player_origin_media_paths_are_dropped(monkeypatch) -> None:
     result = {"task": {"presentation": {"image": "/lernsequenz-medien/term-0123456789abcdef.png", "template": "x"}}}
 
     assert "image" not in practice._absolute_media(result)["task"]["presentation"]
+
+
+@pytest.mark.asyncio
+async def test_course_rating_passes_learning_error_text_and_rejects_malformed_id(db, monkeypatch) -> None:
+    import httpx
+
+    _enable_local_mode(monkeypatch)
+    monkeypatch.setenv("LEARNING_RETRIEVAL_SERVICE_URL", "http://learning-api:8090")
+    refusal = {"code": "zu_viele_stichworte", "message": "Bitte nennen Sie höchstens drei Stichworte.",
+               "retryable": False, "correlation_id": None}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json=refusal)
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(practice.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), timeout=kw.get("timeout")))
+    async with _mounted_learning_client(db) as service:
+        created = await service.post("/api/v1/learning/courses", headers={SERVICE_HEADER: SERVICE_KEY},
+                                     json={"title": "Fehlertext", "description": "", "about": ""})
+    course = created.json()["course"]
+    owner = (await db.execute(select(User))).scalars().first()
+    person = PublicUser.model_validate(owner, from_attributes=True)
+    async with _practice_client(db, person) as client:
+        refused = await client.post("/api/v1/learning/practice/course-rating", json={
+            "course_id": course["course_id"], "smiley": "gut", "stichworte": ["a"],
+        })
+        malformed = await client.get("/api/v1/learning/practice/course-rating/not-a-uuid")
+
+    assert refused.status_code == 400
+    assert refused.json()["detail"] == {"code": "zu_viele_stichworte", "message": "Bitte nennen Sie höchstens drei Stichworte."}
+    assert malformed.status_code == 404

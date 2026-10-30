@@ -315,10 +315,15 @@ async def _notes_request(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=not_found)
     if pass_400 and response.status_code == 400:
         try:
-            detail = response.json().get("detail")
-        except (ValueError, AttributeError):
-            detail = None
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(detail or "rating not valid")[:200])
+            body = response.json()
+        except ValueError:
+            body = None
+        code = body.get("code") if isinstance(body, dict) else None
+        message = body.get("message") if isinstance(body, dict) else None
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={
+            "code": str(code or "bewertung_ungueltig")[:60],
+            "message": str(message or "Die Bewertung ist nicht gültig.")[:200],
+        })
     if response.status_code != 200:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="learning gave no answer")
     return response.json()
@@ -378,9 +383,12 @@ async def get_course_rating(
     db_session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     user = _person(current_user)
-    course = await _course_by_public_id(db_session, course_id.removeprefix("course_"))
-    await _authorize_course(request, db_session, user, course, AccessAction.READ)
-    public_id = str(UUID(course.course_uuid.removeprefix("course_")))
+    try:
+        course = await _course_by_public_id(db_session, course_id.removeprefix("course_"))
+        await _authorize_course(request, db_session, user, course, AccessAction.READ)
+        public_id = str(UUID(course.course_uuid.removeprefix("course_")))
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="course not found") from error
     return await _notes_request(
         "GET", f"/api/v1/kursbewertung/{public_id}", user, db_session, not_found="rating not found",
     )
