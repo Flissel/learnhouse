@@ -179,6 +179,61 @@ async def test_notes_are_proxied_for_the_signed_in_person_only(db, monkeypatch) 
     assert seen[1][0] == "PATCH" and seen[1][1].endswith("/api/v1/notizen/11111111-1111-4111-8111-111111111111")
 
 
+@pytest.mark.asyncio
+async def test_course_rating_is_proxied_with_server_side_title(db, monkeypatch) -> None:
+    import json as jsonlib
+
+    import httpx
+
+    _enable_local_mode(monkeypatch)
+    monkeypatch.setenv("LEARNING_RETRIEVAL_SERVICE_URL", "http://learning-api:8090")
+    seen: list[tuple[str, str, dict[str, str], dict]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = jsonlib.loads(request.content) if request.content else {}
+        seen.append((request.method, str(request.url), dict(request.headers), body))
+        return httpx.Response(200, json={"smiley": "gut", "stichworte": ["klar"]})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(practice.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), timeout=kw.get("timeout")))
+    async with _mounted_learning_client(db) as service:
+        created = await service.post("/api/v1/learning/courses", headers={SERVICE_HEADER: SERVICE_KEY},
+                                     json={"title": "Echter Titel", "description": "", "about": ""})
+    course = created.json()["course"]
+    bare = course["course_id"].removeprefix("course_")
+    owner = (await db.execute(select(User))).scalars().first()
+    org_id = (await db.execute(select(UserOrganization.org_id).where(UserOrganization.user_id == owner.id))).scalars().first()
+    person = PublicUser.model_validate(owner, from_attributes=True)
+    async with _practice_client(db, person) as client:
+        rated = await client.post("/api/v1/learning/practice/course-rating", json={
+            "course_id": course["course_id"], "smiley": "gut", "stichworte": ["klar"],
+        })
+        forged = await client.post("/api/v1/learning/practice/course-rating", json={
+            "course_id": course["course_id"], "smiley": "gut", "stichworte": [], "kurs_titel": "Falsch",
+        })
+        unknown = await client.post("/api/v1/learning/practice/course-rating", json={
+            "course_id": str(uuid4()), "smiley": "gut", "stichworte": [],
+        })
+        fetched = await client.get(f"/api/v1/learning/practice/course-rating/{course['course_id']}")
+        fetched_unknown = await client.get(f"/api/v1/learning/practice/course-rating/{uuid4()}")
+    async with _practice_client(db, AnonymousUser()) as anonymous:
+        refused = await anonymous.post("/api/v1/learning/practice/course-rating", json={
+            "course_id": course["course_id"], "smiley": "gut", "stichworte": [],
+        })
+
+    assert rated.status_code == 200 and fetched.status_code == 200
+    assert forged.status_code == 422  # the client cannot send a title
+    assert unknown.status_code == 404 and fetched_unknown.status_code == 404
+    assert refused.status_code == 401
+    method, url, headers, body = seen[0]
+    assert (method, url) == ("POST", "http://learning-api:8090/api/v1/kursbewertung")
+    assert body == {"course_id": bare, "kurs_titel": "Echter Titel", "smiley": "gut", "stichworte": ["klar"]}
+    assert headers["x-learnhouse-learning-service-key"] == SERVICE_KEY
+    assert headers["x-learning-actor"] == f"lh-{org_id}-{owner.user_uuid}"
+    assert seen[1][0] == "GET" and seen[1][1] == f"http://learning-api:8090/api/v1/kursbewertung/{bare}"
+    assert len(seen) == 2
+
+
 def test_media_paths_become_absolute_on_the_player_origin(monkeypatch) -> None:
     # 27.10.: drawn terminal windows live on learning-api, not on LearnHouse; the practice
     # page would load "/lernsequenz-medien/..." from its own host and show nothing.

@@ -37,7 +37,7 @@ class _Strict(BaseModel):
 
 class WerkstattEintrag(_Strict):
     key: str = Field(min_length=1, max_length=200)
-    art: Literal["lesson", "task"]
+    art: Literal["lesson", "task", "bewertung"]
     titel: str = Field(min_length=1, max_length=500)
     markdown: str | None = Field(default=None, max_length=100_000)
     claims: list[str] = Field(default_factory=list, max_length=2_000)
@@ -70,6 +70,9 @@ class WerkstattStandRead(_Strict):
     unveroeffentlicht: int
 
 
+_BEWERTUNG_HINWEIS = "Bitte bewerten Sie zum Schluss den Kurs."
+
+
 def _content_for(entry: WerkstattEintrag, math: bool = False) -> dict:
     if entry.art == "lesson":
         body = entry.markdown or ""
@@ -78,6 +81,8 @@ def _content_for(entry: WerkstattEintrag, math: bool = False) -> dict:
             "markdown": body,
             "claims": [{"text": claim} for claim in entry.claims],
         }
+    if entry.art == "bewertung":
+        return lesson_doc(_BEWERTUNG_HINWEIS, [])
     prompt = entry.prompt or entry.titel
     return {**task_doc(prompt, _TASK_NOTE, math), "prompt": prompt}
 

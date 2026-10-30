@@ -664,3 +664,24 @@ async def test_nicht_werkstatt_kapitel_wird_nicht_umbenannt(db, monkeypatch) -> 
     chapters = (await db.execute(select(Chapter))).scalars().all()
     assert "Foundations" in {c.name for c in chapters}
     assert "Ganz Neu" in {c.name for c in chapters}
+
+
+@pytest.mark.asyncio
+async def test_werkstatt_stand_legt_bewertungsseite_an(db, monkeypatch) -> None:
+    _enable_local_mode(monkeypatch)
+    bewertung = {"key": "kursbewertung", "art": "bewertung", "titel": "Wie fanden Sie diesen Kurs?"}
+    async with _mounted_learning_client(db) as client:
+        course_id, rev = await _published_course(client)
+        response = await client.put(
+            _url(course_id), headers=H,
+            json=_stand(rev, "f-bew", [
+                {"titel": "Foundations", "eintraege": [_lektion("l1", "Eins", "Text.")]},
+                {"titel": "Kurs abschließen", "eintraege": [bewertung]},
+            ]),
+        )
+    assert response.status_code == 200
+    page = next(a for a in await _activities(db) if (a.extra_metadata or {}).get("werkstatt_key") == "kursbewertung")
+    assert page.details["learning_kind"] == "bewertung"
+    assert page.extra_metadata["learning_kind"] == "bewertung"
+    assert page.name == "Wie fanden Sie diesen Kurs?"
+    assert page.published is True

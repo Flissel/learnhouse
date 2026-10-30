@@ -70,6 +70,13 @@ class NoteText(_Strict):
     own_text: str = Field(max_length=10_000)
 
 
+class CourseRatingWrite(_Strict):
+    # No title on purpose: the course title comes from the database, never from the browser.
+    course_id: str = Field(min_length=1, max_length=80)
+    smiley: Literal["gut", "mittel", "schlecht"]
+    stichworte: list[str] = Field(default_factory=list, max_length=20)
+
+
 def learner_id(user: PublicUser, org_id: int | None) -> str:
     """The person as Learning learner; same person, same id across sessions."""
     raw = f"lh-{org_id or 0}-{user.user_uuid}"
@@ -287,6 +294,7 @@ _NOTE_ID = re.compile(r"^[0-9a-fA-F-]{36}$")
 
 async def _notes_request(
     method: str, path: str, user: PublicUser, db_session: AsyncSession, *, json: dict[str, Any] | None = None,
+    not_found: str = "note not found", pass_400: bool = False,
 ) -> dict[str, Any]:
     """learning-api's notes API, always for the signed-in person: the service key and the
     learner id come from this server, never from the browser."""
@@ -304,7 +312,13 @@ async def _notes_request(
     except httpx.HTTPError as error:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="learning unavailable") from error
     if response.status_code == 404:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="note not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=not_found)
+    if pass_400 and response.status_code == 400:
+        try:
+            detail = response.json().get("detail")
+        except (ValueError, AttributeError):
+            detail = None
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(detail or "rating not valid")[:200])
     if response.status_code != 200:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="learning gave no answer")
     return response.json()
@@ -329,4 +343,44 @@ async def set_note_text(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="note id is not valid")
     return await _notes_request(
         "PATCH", f"/api/v1/notizen/{note_id}", _person(current_user), db_session, json={"own_text": payload.own_text},
+    )
+
+
+# --- course rating: one rating per person and course, kept by learning-api ---
+
+@router.post("/practice/course-rating")
+async def rate_course(
+    payload: CourseRatingWrite,
+    request: Request,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    user = _person(current_user)
+    course = await _course_by_public_id(db_session, payload.course_id.removeprefix("course_"))
+    await _authorize_course(request, db_session, user, course, AccessAction.READ)
+    return await _notes_request(
+        "POST", "/api/v1/kursbewertung", user, db_session,
+        json={
+            "course_id": str(UUID(course.course_uuid.removeprefix("course_"))),
+            "kurs_titel": course.name,
+            "smiley": payload.smiley,
+            "stichworte": payload.stichworte,
+        },
+        not_found="course not found", pass_400=True,
+    )
+
+
+@router.get("/practice/course-rating/{course_id}")
+async def get_course_rating(
+    course_id: str,
+    request: Request,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    user = _person(current_user)
+    course = await _course_by_public_id(db_session, course_id.removeprefix("course_"))
+    await _authorize_course(request, db_session, user, course, AccessAction.READ)
+    public_id = str(UUID(course.course_uuid.removeprefix("course_")))
+    return await _notes_request(
+        "GET", f"/api/v1/kursbewertung/{public_id}", user, db_session, not_found="rating not found",
     )
