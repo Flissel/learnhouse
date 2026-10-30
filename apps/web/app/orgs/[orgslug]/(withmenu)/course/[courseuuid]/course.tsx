@@ -612,7 +612,7 @@ const CourseClient = (props: any) => {
                           {chapter.activities.map((activity: any) => {
                             const locked = !!activity.is_locked
                             const RowInner = (
-                              <div className="flex space-x-3 items-center">
+                              <div className="flex space-x-3 items-center min-w-0">
                                 <div className="flex items-center">
                                   {locked ? (
                                     <div className="text-rose-400">
@@ -629,7 +629,7 @@ const CourseClient = (props: any) => {
                                     </div>
                                   )}
                                 </div>
-                                <div className="flex flex-col grow">
+                                <div className="flex flex-col grow min-w-0">
                                   <div className="flex items-center space-x-2 w-full">
                                     <p className={`min-w-0 break-words font-semibold transition-colors ${locked ? 'text-neutral-400' : 'text-neutral-600 group-hover:text-neutral-800'}`}>{activity.name}</p>
                                     {locked && (
