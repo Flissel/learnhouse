@@ -613,3 +613,54 @@ async def test_freigabe_entfernte_aktivitaet_bleibt_unveroeffentlicht(db, monkey
     assert rows["neu-1"].published is False
     assert rows["lesson-authority"].published is True
     assert (await _course_row(db)).published is True
+
+
+@pytest.mark.asyncio
+async def test_umbenanntes_kapitel_wird_wiederverwendet(db, monkeypatch) -> None:
+    _enable_local_mode(monkeypatch)
+    async with _mounted_learning_client(db) as client:
+        course_id, rev = await _published_course(client)
+        first = await client.put(
+            _url(course_id), headers=H,
+            json=_stand(rev, "f1", [
+                {"titel": "A $x$", "eintraege": [_lektion("a-1", "A1", "Text.")]},
+                {"titel": "B", "eintraege": [_lektion("b-1", "B1", "Text.")]},
+            ]),
+        )
+        assert first.status_code == 200, first.text
+        old = (await db.execute(select(Chapter).where(Chapter.name == "A $x$"))).scalars().one()
+        old_id, old_uuid = old.id, old.chapter_uuid
+        second = await client.put(
+            _url(course_id), headers=H,
+            json=_stand(rev + 1, "f2", [
+                {"titel": "A x", "eintraege": [_lektion("a-1", "A1", "Text.")]},
+                {"titel": "B", "eintraege": [_lektion("b-1", "B1", "Text.")]},
+            ]),
+        )
+        assert second.status_code == 200, second.text
+    db.expire_all()
+    chapters = (await db.execute(select(Chapter).where(Chapter.extra_metadata.is_not(None)))).scalars().all()
+    werkstatt = [c for c in chapters if (c.extra_metadata or {}).get("werkstatt_generated")]
+    assert sorted(c.name for c in werkstatt) == ["A x", "B"]
+    renamed = next(c for c in werkstatt if c.name == "A x")
+    assert renamed.id == old_id and renamed.chapter_uuid == old_uuid
+    links = (await db.execute(select(ChapterActivity))).scalars().all()
+    for chapter in werkstatt:
+        assert any(link.chapter_id == chapter.id for link in links)
+    a1 = next(a for a in await _activities(db) if (a.extra_metadata or {}).get("werkstatt_key") == "a-1")
+    assert next(l for l in links if l.activity_id == a1.id).chapter_id == old_id
+
+
+@pytest.mark.asyncio
+async def test_nicht_werkstatt_kapitel_wird_nicht_umbenannt(db, monkeypatch) -> None:
+    _enable_local_mode(monkeypatch)
+    async with _mounted_learning_client(db) as client:
+        course_id, rev = await _published_course(client)
+        response = await client.put(
+            _url(course_id), headers=H,
+            json=_stand(rev, "f1", [{"titel": "Ganz Neu", "eintraege": [_lektion("neu-1", "Neu", "Text.")]}]),
+        )
+        assert response.status_code == 200, response.text
+    chapters = (await db.execute(select(Chapter))).scalars().all()
+    assert "Foundations" in {c.name for c in chapters}
+    assert "Ganz Neu" in {c.name for c in chapters}
