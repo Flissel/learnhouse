@@ -1,6 +1,10 @@
+'use client'
+
+import { useEffect, useRef } from 'react'
 import { ArrowRight, ArrowUpRight, GraduationCap, Lightbulb, ShieldCheck, Trophy } from 'lucide-react'
 
 import type { LearningCourse } from './LearningShell'
+import { shouldScrollToFeedback } from '@/lib/learning/feedbackScroll'
 import MathText from './MathText'
 import TaskRenderer, { type LearningTask, type TaskAnswer } from './TaskRenderer'
 
@@ -59,6 +63,16 @@ export default function LearningPlayer({
 }: LearningPlayerProps) {
   const isTraining = model.mode === 'training'
   const answered = Boolean(model.feedback)
+  const feedbackRef = useRef<HTMLElement | null>(null)
+  const shownFeedback = useRef<LearningPlayerModel['feedback']>(undefined)
+  const visibleFeedback = isTraining ? model.feedback : undefined
+  useEffect(() => {
+    if (shouldScrollToFeedback(shownFeedback.current, visibleFeedback)) {
+      feedbackRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+      feedbackRef.current?.focus({ preventScroll: true })
+    }
+    shownFeedback.current = visibleFeedback
+  }, [visibleFeedback])
 
   return (
     <div className="mx-auto w-full max-w-4xl min-w-0 px-5 py-6 sm:px-8 lg:px-10">
@@ -105,7 +119,7 @@ export default function LearningPlayer({
       ) : null}
 
       {isTraining && model.feedback ? (
-        <section className="pt-6" aria-labelledby="feedback-title">
+        <section ref={feedbackRef} tabIndex={-1} className="pt-6 outline-none" aria-labelledby="feedback-title">
           <div className="flex items-center gap-2">
             <ShieldCheck aria-hidden="true" className="text-teal-700" size={17} />
             <h3 className="text-sm font-semibold text-zinc-950" id="feedback-title">Quellengebundenes Feedback</h3>
