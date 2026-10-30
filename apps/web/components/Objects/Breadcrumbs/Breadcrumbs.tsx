@@ -29,8 +29,8 @@ const ChevronDivider = () => (
 
 export function Breadcrumbs({ items }: BreadcrumbsProps) {
   return (
-    <nav className="flex items-center">
-      <ol className="flex items-center text-[13px] font-medium rounded-lg bg-white overflow-hidden nice-shadow">
+    <nav className="flex min-w-0 max-w-full items-center">
+      <ol className="flex min-w-0 max-w-full items-center text-[13px] font-medium rounded-lg bg-white overflow-hidden nice-shadow">
         {items.map((item, index) => {
           const isLast = index === items.length - 1
           const isFirst = index === 0
@@ -42,7 +42,7 @@ export function Breadcrumbs({ items }: BreadcrumbsProps) {
                   <ChevronDivider />
                 </li>
               )}
-              <li className="flex items-center h-8">
+              <li className="flex min-w-0 items-center h-8">
                 {item.href && !isLast ? (
                   <Link
                     href={item.href}
@@ -54,7 +54,7 @@ export function Breadcrumbs({ items }: BreadcrumbsProps) {
                     <span className="truncate max-w-[150px]">{item.label}</span>
                   </Link>
                 ) : (
-                  <span className={`flex items-center h-full text-gray-900 ${
+                  <span className={`flex min-w-0 items-center h-full text-gray-900 ${
                     isFirst && item.icon ? 'gap-1.5 px-2.5' : 'px-2.5'
                   }`}>
                     {item.icon}

@@ -824,7 +824,7 @@ function ActivityClient(props: ActivityClientProps) {
                                 />
                               </Link>
                             </div>
-                            <div className="flex flex-col -space-y-1">
+                            <div className="flex flex-col -space-y-1 min-w-0">
                               <p className="font-bold text-gray-700 text-xs sm:text-md">{t('search.course')} </p>
                               <h1 className="font-bold text-gray-950 text-lg sm:text-3xl first-letter:uppercase">
                                 {course.name}

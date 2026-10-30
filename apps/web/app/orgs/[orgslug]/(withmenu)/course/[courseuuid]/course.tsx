@@ -587,7 +587,7 @@ const CourseClient = (props: any) => {
                           </svg>
                         </div>
                         {/* Title and badge column */}
-                        <div className="flex flex-col items-start w-full">
+                        <div className="flex flex-col items-start w-full min-w-0">
                           <div className="flex items-center flex-wrap mb-1 w-full min-w-0">
                             {/* Numbered badge */}
                             <span className="flex items-center justify-center w-5 h-5 rounded-full bg-neutral-200 text-neutral-600 text-xs font-semibold me-2 border border-neutral-300 flex-shrink-0">
@@ -631,7 +631,7 @@ const CourseClient = (props: any) => {
                                 </div>
                                 <div className="flex flex-col grow">
                                   <div className="flex items-center space-x-2 w-full">
-                                    <p className={`font-semibold transition-colors ${locked ? 'text-neutral-400' : 'text-neutral-600 group-hover:text-neutral-800'}`}>{activity.name}</p>
+                                    <p className={`min-w-0 break-words font-semibold transition-colors ${locked ? 'text-neutral-400' : 'text-neutral-600 group-hover:text-neutral-800'}`}>{activity.name}</p>
                                     {locked && (
                                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-50 border border-rose-200 text-rose-600 text-[10px] font-semibold">
                                         <Lock size={10} />

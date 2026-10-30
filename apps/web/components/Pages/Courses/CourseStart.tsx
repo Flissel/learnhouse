@@ -46,11 +46,11 @@ export default function CourseStart({ course, trail, orgslug }: CourseStartProps
         </div>
         {next ? (
           <Link
-            className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-[#0E6B5C] px-5 font-semibold text-white hover:bg-[#0B5649] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0E6B5C]/40"
+            className="inline-flex min-h-12 min-w-0 max-w-full items-center gap-2 rounded-xl bg-[#0E6B5C] px-5 font-semibold text-white hover:bg-[#0B5649] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0E6B5C]/40"
             href={href(next)}
           >
             <Play aria-hidden="true" size={16} />
-            <span>{finished > 0 ? 'Weiter mit' : 'Starten mit'}: {shortTitle(next.name)}</span>
+            <span className="min-w-0 break-words">{finished > 0 ? 'Weiter mit' : 'Starten mit'}: {shortTitle(next.name)}</span>
           </Link>
         ) : total > 0 ? (
           <div className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-[#E8F2EF] px-5 font-semibold text-[#0E6B5C]">
@@ -60,7 +60,7 @@ export default function CourseStart({ course, trail, orgslug }: CourseStartProps
       </div>
 
       {chapters.length ? (
-        <ol aria-label="Schritte" className="mt-5 grid gap-2 sm:grid-cols-2">
+        <ol aria-label="Schritte" className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-2">
           {chapters.map((chapter, index) => {
             const status = chapterStatus(trail, chapter, chapters, course.course_uuid)
             const first = chapter.activities?.[0]
@@ -83,9 +83,9 @@ export default function CourseStart({ course, trail, orgslug }: CourseStartProps
                 <ChevronRight aria-hidden="true" className="shrink-0 text-zinc-400" size={16} />
               </>
             )
-            const className = `flex min-h-12 items-center gap-3 rounded-xl border px-3 py-2 ${frame}`
+            const className = `flex min-h-12 min-w-0 items-center gap-3 rounded-xl border px-3 py-2 ${frame}`
             return (
-              <li key={chapter.chapter_uuid}>
+              <li className="min-w-0" key={chapter.chapter_uuid}>
                 {first ? (
                   <Link aria-current={status === 'current' ? 'step' : undefined} className={className} href={href(first)}>{inner}</Link>
                 ) : (

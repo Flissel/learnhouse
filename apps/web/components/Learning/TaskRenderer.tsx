@@ -335,7 +335,7 @@ export default function TaskRenderer({ task, submitLabel, onSubmit, onOpenCanvas
           <FillInTaskField task={task} />
         ) : task.type === 'canvas' && task.canvasUrl ? (
           <iframe
-            className="h-[780px] w-full rounded-md border border-zinc-300 bg-white"
+            className="h-[85vh] min-h-[560px] w-full rounded-md border border-zinc-300 bg-white"
             id="answer"
             src={task.canvasUrl}
             title="Zeichenfläche"
