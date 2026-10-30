@@ -18,6 +18,26 @@ function turn(overrides: Partial<PracticeTurn> = {}): PracticeTurn {
   }
 }
 
+const DU_IMPERATIVES = 'Starte|Schau|Prüfe|Wähle|Gib|Klick|Klicke|Nimm|Lies|Versuch|Versuche|Probier|Probiere|Tippe|Zeichne|Beantworte|Öffne|Denk|Denke|Achte'
+const DU_PRONOUNS = /\b(du|dein\w*|dir|dich)\b/i
+const DU_IMPERATIVE = new RegExp(String.raw`(?:^|[.!?:;"'>]\s*|\s[–-]\s)(?:${DU_IMPERATIVES})(?![\p{L}])`, 'u')
+
+/** True when a learner-visible text addresses the reader with du (pronoun or imperative). */
+function duForm(text: string): boolean {
+  return DU_PRONOUNS.test(text) || DU_IMPERATIVE.test(text.trim())
+}
+
+describe('duForm scanner', () => {
+  test('flags imperatives and pronouns, not the Sie form', () => {
+    expect(duForm('Starte eine Lernsitzung')).toBe(true)
+    expect(duForm('Hallo. Schau genau hin')).toBe(true)
+    expect(duForm('Was verstehst du nicht?')).toBe(true)
+    expect(duForm('Starten Sie eine Lernsitzung')).toBe(false)
+    expect(duForm('Wählen Sie eine Antwort')).toBe(false)
+    expect(duForm('Gibt es Belege?')).toBe(false)
+  })
+})
+
 describe('practiceModel', () => {
   test('maps an engine task with options, evidence and progress', () => {
     const model = practiceModel(turn(), { mode: 'training' })
@@ -251,7 +271,7 @@ describe('answerFromForm numeric', () => {
         ...[...src.matchAll(/'([^'\n]*)'|"([^"\n]*)"|`([^`]*)`/g)].map((m) => m[1] ?? m[2] ?? m[3] ?? ''),
         ...[...src.matchAll(/>([^<>{}]+)</g)].map((m) => m[1]),
       ]
-      for (const text of strings) expect([file, du.test(text) ? text : '']).toEqual([file, ''])
+      for (const text of strings) expect([file, duForm(text) ? text : '']).toEqual([file, ''])
     }
   })
 })
