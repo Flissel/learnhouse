@@ -250,7 +250,7 @@ describe('answerFromForm numeric', () => {
     })
     const canvas = practiceModel(turn(), { mode: 'training', canvas: { taskId: 't1', url: 'u', submitted: true } })
     texts.push(canvas.feedback!.message)
-    for (const text of texts) expect(text).not.toMatch(/(du|dein\w*|dir|dich|schau)/i)
+    for (const text of texts) expect(duForm(text)).toBe(false)
   })
 
   test('excerpts are cut outside formulas, at whitespace, with an ellipsis', () => {
@@ -264,7 +264,6 @@ describe('answerFromForm numeric', () => {
   test('learner-visible strings in the touched components avoid du-forms', () => {
     const files = ['LearningPlayer.tsx', 'TaskRenderer.tsx', 'AgentPanel.tsx', 'SourceEvidence.tsx']
       .map((f) => `components/Learning/${f}`).concat('components/Pages/Courses/CourseStart.tsx')
-    const du = /\b(du|dein\w*|dir|dich)\b/i
     for (const file of files) {
       const src = readFileSync(file, 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
       const strings = [
