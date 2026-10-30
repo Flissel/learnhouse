@@ -174,7 +174,13 @@ async def _apply(
 
     now = str(datetime.now())
     course_id = int(course.id or 0)
-    published = bool(course.published)
+    # A release makes the course visible: course and every activity it writes are published.
+    # Removed (`entfernen`) activities are handled below and stay unpublished.
+    if not course.published:
+        course.published = True
+        course.update_date = now
+        db_session.add(course)
+    published = True
     activities = (
         await db_session.execute(select(Activity).where(Activity.course_id == course.id))
     ).scalars().all()
@@ -251,8 +257,7 @@ async def _apply(
                     activity.content = new_content
                     activity.name = entry.titel
                     activity.update_date = now
-                if published:
-                    activity.published = True
+                activity.published = True
                 activity.extra_metadata = {
                     **(activity.extra_metadata or {}),
                     "werkstatt_key": entry.key,

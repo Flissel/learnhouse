@@ -560,3 +560,56 @@ async def test_formeln_nur_mit_math(db, monkeypatch) -> None:
     by_key = {(a.extra_metadata or {}).get("werkstatt_key"): a for a in await _activities(db)}
     assert "blockMathEquation" in _types(by_key["lesson-authority"].content)
     assert "inlineMathEquation" in _types(by_key["t-1"].content)
+
+
+async def _unpublished_course(client, db) -> tuple[str, int]:
+    course_id, rev = await _published_course(client)
+    course = await _course_row(db)
+    course.published = False
+    db.add(course)
+    await db.flush()
+    return course_id, rev
+
+
+@pytest.mark.asyncio
+async def test_freigabe_veroeffentlicht_unveroeffentlichten_kurs_und_aktivitaeten(db, monkeypatch) -> None:
+    _enable_local_mode(monkeypatch)
+    async with _mounted_learning_client(db) as client:
+        course_id, rev = await _unpublished_course(client, db)
+        response = await client.put(
+            _url(course_id), headers=H,
+            json=_stand(rev, "f1", _foundations(
+                _lektion("lesson-authority", "Autoritaet", "Neuer Text."),
+                _aufgabe("neu-1", "Neu", "Frage?"),
+            )),
+        )
+    assert response.status_code == 200, response.text
+    assert (await _course_row(db)).published is True
+    rows = {_key(a): a for a in await _activities(db)}
+    assert rows["neu-1"].published is True
+    assert rows["lesson-authority"].published is True
+
+
+@pytest.mark.asyncio
+async def test_freigabe_laesst_veroeffentlichten_kurs_veroeffentlicht(db, monkeypatch) -> None:
+    _enable_local_mode(monkeypatch)
+    async with _mounted_learning_client(db) as client:
+        course_id, rev = await _published_course(client)
+        response = await _put(client, course_id, rev, "f1", _lektion("neu-1", "Neu", "Text."))
+    assert response.status_code == 200, response.text
+    assert (await _course_row(db)).published is True
+
+
+@pytest.mark.asyncio
+async def test_freigabe_entfernte_aktivitaet_bleibt_unveroeffentlicht(db, monkeypatch) -> None:
+    _enable_local_mode(monkeypatch)
+    async with _mounted_learning_client(db) as client:
+        course_id, rev = await _unpublished_course(client, db)
+        first = await _put(client, course_id, rev, "f1",
+                           _lektion("lesson-authority", "Autoritaet", "Text."), _aufgabe("neu-1", "A", "Frage?"))
+        second = await _put(client, course_id, rev + 1, "f2", _lektion("lesson-authority", "Autoritaet", "Text."))
+    assert first.status_code == 200 and second.status_code == 200, second.text
+    rows = {_key(a): a for a in await _activities(db)}
+    assert rows["neu-1"].published is False
+    assert rows["lesson-authority"].published is True
+    assert (await _course_row(db)).published is True
