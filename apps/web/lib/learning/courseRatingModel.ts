@@ -18,3 +18,21 @@ export function cleanKeywords(input: string[]): KeywordResult {
 }
 
 export const allesSuper = (): RatingPayload => ({ smiley: 'gut', stichworte: [] })
+
+export interface StoredRating {
+  smiley: Smiley
+  stichworte: string[]
+  aktualisiert?: string
+}
+
+/** What the proxy answers on GET: the rating wrapped, or null when there is none yet. */
+export interface RatingReply {
+  bewertung: StoredRating | null
+}
+
+/** Form values for an existing own rating; null when nothing is stored. */
+export function prefillFrom(reply: RatingReply | null | undefined): { smiley: Smiley; words: string[] } | null {
+  const own = reply?.bewertung
+  if (!own || !own.smiley) return null
+  return { smiley: own.smiley, words: [...(own.stichworte ?? []), '', '', ''].slice(0, MAX_KEYWORDS) }
+}

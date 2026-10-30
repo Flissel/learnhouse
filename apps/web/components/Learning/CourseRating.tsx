@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useLHSession } from '@components/Contexts/LHSessionContext'
 import { getCourseRating, submitCourseRating } from '@/services/learning/practice'
-import { allesSuper, cleanKeywords, MAX_KEYWORD_LENGTH, type Smiley } from '@/lib/learning/courseRatingModel'
+import { allesSuper, cleanKeywords, MAX_KEYWORD_LENGTH, prefillFrom, type Smiley } from '@/lib/learning/courseRatingModel'
 
 interface CourseRatingProps {
   courseUuid: string
@@ -29,10 +29,11 @@ export default function CourseRating({ courseUuid }: CourseRatingProps) {
   useEffect(() => {
     let active = true
     getCourseRating(courseId, token)
-      .then((own) => {
-        if (!active || !own || !own.smiley) return
+      .then((reply) => {
+        const own = prefillFrom(reply)
+        if (!active || !own) return
         setSmiley(own.smiley)
-        setWords([...(own.stichworte ?? []), '', '', ''].slice(0, 3))
+        setWords(own.words)
         setSaved(true)
       })
       .catch(() => undefined)
@@ -51,7 +52,8 @@ export default function CourseRating({ courseUuid }: CourseRatingProps) {
       await submitCourseRating(courseId, chosen, cleaned.stichworte, token)
       setSaved(true)
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Die Bewertung konnte nicht gespeichert werden.')
+      const own = (reason as { userMessage?: unknown } | null)?.userMessage
+      setError(typeof own === 'string' && own ? own : 'Die Bewertung konnte nicht gespeichert werden. Bitte versuchen Sie es noch einmal.')
     } finally {
       setBusy(false)
     }

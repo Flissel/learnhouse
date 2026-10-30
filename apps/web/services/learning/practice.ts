@@ -1,3 +1,4 @@
+import type { RatingReply, StoredRating } from '@/lib/learning/courseRatingModel'
 import { getAPIUrl } from '@services/config/config'
 import { RequestBodyWithAuthHeader, secureFetch } from '@services/utils/ts/requests'
 
@@ -73,12 +74,9 @@ async function call<T = PracticeReply>(path: string, method: 'GET' | 'POST' | 'P
   )
   const data = await response.json().catch(() => ({}))
   if (!response.ok) {
-    const detail = typeof data?.detail === 'string'
-      ? data.detail
-      : typeof data?.detail?.message === 'string'
-        ? data.detail.message
-        : 'Die Übung ist gerade nicht erreichbar.'
-    throw new Error(detail)
+    const userMessage = typeof data?.detail?.message === 'string' ? (data.detail.message as string) : undefined
+    const detail = typeof data?.detail === 'string' ? data.detail : userMessage ?? 'Die Übung ist gerade nicht erreichbar.'
+    throw Object.assign(new Error(detail), { userMessage })
   }
   return data as T
 }
@@ -122,16 +120,13 @@ export const listNotes = (token?: string) => call<{ notes: NoteRead[] }>('notes'
 export const setNoteText = (noteId: string, ownText: string, token?: string) =>
   call<NoteRead>(`notes/${encodeURIComponent(noteId)}`, 'PATCH', token, { own_text: ownText })
 
-export interface CourseRatingRead {
-  smiley: 'gut' | 'mittel' | 'schlecht'
-  stichworte: string[]
-}
+export type CourseRatingRead = StoredRating
 
 export const submitCourseRating = (courseId: string, smiley: 'gut' | 'mittel' | 'schlecht', stichworte: string[], token?: string) =>
-  call<CourseRatingRead>('course-rating', 'POST', token, { course_id: courseId, smiley, stichworte })
+  call<unknown>('course-rating', 'POST', token, { course_id: courseId, smiley, stichworte })
 
 export const getCourseRating = (courseId: string, token?: string) =>
-  call<CourseRatingRead | null>(`course-rating/${encodeURIComponent(courseId)}`, 'GET', token)
+  call<RatingReply>(`course-rating/${encodeURIComponent(courseId)}`, 'GET', token)
 
 export interface PlayerPerson {
   token: string
