@@ -14,6 +14,8 @@ export interface LearningPlayerModel {
     state: 'correct' | 'incorrect' | 'needs_review' | 'submitted'
     message: string
     misconception?: string
+    /** Criteria below 100 %, with the grader's text. */
+    criteria?: Array<{ id: string; description: string; feedback: string }>
   }
   hint?: string
   // Set when the session is over: attempted, correct, overall score 0..1.
@@ -102,6 +104,31 @@ export default function LearningPlayer({
         </p>
       ) : null}
 
+      {isTraining && model.feedback ? (
+        <section className="pt-6" aria-labelledby="feedback-title">
+          <div className="flex items-center gap-2">
+            <ShieldCheck aria-hidden="true" className="text-teal-700" size={17} />
+            <h3 className="text-sm font-semibold text-zinc-950" id="feedback-title">Quellengebundenes Feedback</h3>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-zinc-700"><MathText math={model.task?.math} text={model.feedback.message} /></p>
+          {model.feedback.misconception ? (
+            <p className="mt-2 border-s-4 border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+              Fehlvorstellung: <MathText math={model.task?.math} text={model.feedback.misconception} />
+            </p>
+          ) : null}
+          {model.feedback.criteria?.length ? (
+            <ul aria-label="Kriterien" className="mt-3 space-y-2">
+              {model.feedback.criteria.map((c) => (
+                <li className="border-s-4 border-zinc-300 bg-zinc-50 px-3 py-2 text-sm text-zinc-800" key={c.id}>
+                  <p className="font-medium"><MathText math={model.task?.math} text={c.description} /></p>
+                  <p className="mt-1 leading-6 text-zinc-700"><MathText math={model.task?.math} text={c.feedback} /></p>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+      ) : null}
+
       <div className="py-6">
         {model.summary ? (
           <div className="border-s-4 border-emerald-500 bg-zinc-50 px-5 py-5">
@@ -111,7 +138,7 @@ export default function LearningPlayer({
             </div>
             <p className="mt-2 text-sm leading-6 text-zinc-600">
               {model.summary.correct} von {model.summary.attempted} richtig ({Math.round(model.summary.score * 100)} %).
-              Dein Lernstand ist aktualisiert.
+              Ihr Lernstand ist aktualisiert.
             </p>
             {onStartSession ? (
               <button className="mt-4 inline-flex h-10 items-center rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white" onClick={onStartSession} type="button">
@@ -135,7 +162,7 @@ export default function LearningPlayer({
               <h3 className="text-base font-semibold text-zinc-950">Keine aktive Aufgabe</h3>
             </div>
             <p className="mt-2 text-sm leading-6 text-zinc-600">
-              {startHint ?? 'Starte eine Lernsitzung: Die Aufgaben werden für deinen Lernstand ausgewählt.'}
+              {startHint ?? 'Starten Sie eine Lernsitzung: Die Aufgaben werden für Ihren Lernstand ausgewählt.'}
             </p>
             <button
               className="mt-4 me-4 inline-flex h-10 items-center rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
@@ -153,21 +180,6 @@ export default function LearningPlayer({
           </div>
         )}
       </div>
-
-      {isTraining && model.feedback ? (
-        <section className="border-t border-zinc-200 py-5" aria-labelledby="feedback-title">
-          <div className="flex items-center gap-2">
-            <ShieldCheck aria-hidden="true" className="text-teal-700" size={17} />
-            <h3 className="text-sm font-semibold text-zinc-950" id="feedback-title">Quellengebundenes Feedback</h3>
-          </div>
-          <p className="mt-2 text-sm leading-6 text-zinc-700"><MathText math={model.task?.math} text={model.feedback.message} /></p>
-          {model.feedback.misconception ? (
-            <p className="mt-2 border-s-4 border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-950">
-              Fehlvorstellung: <MathText math={model.task?.math} text={model.feedback.misconception} />
-            </p>
-          ) : null}
-        </section>
-      ) : null}
 
       {answered && onNext ? (
         <button

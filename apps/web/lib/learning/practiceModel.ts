@@ -1,24 +1,34 @@
 import type { LearningPlayerModel } from '@components/Learning/LearningPlayer'
 import type { Box, LearningTask, Picture } from '@components/Learning/TaskRenderer'
-import { evidenceTitle, type PracticeTask, type PracticeTurn } from '@/services/learning/practice'
+import { evidenceTitle, type PracticeCriterion, type PracticeTask, type PracticeTurn } from '@/services/learning/practice'
 
 const FEEDBACK: Record<string, { state: 'correct' | 'incorrect' | 'needs_review'; message: string }> = {
   correct: { state: 'correct', message: 'Richtig – gut gemacht.' },
-  partial: { state: 'incorrect', message: 'Teilweise richtig. Schau dir die Quellenbelege noch einmal an.' },
+  partial: { state: 'incorrect', message: 'Teilweise richtig. Sehen Sie sich die Quellenbelege noch einmal an.' },
   incorrect: { state: 'incorrect', message: 'Noch nicht richtig. Die Quellenbelege unten zeigen, wo es steht.' },
-  needs_review: { state: 'needs_review', message: 'Deine Antwort wird von einer Person geprüft; danach zählt sie für deinen Lernstand.' },
+  needs_review: { state: 'needs_review', message: 'Ihre Antwort wird von einer Person geprüft; danach zählt sie für Ihren Lernstand.' },
 }
 
 const CANVAS_SUBMITTED = {
   state: 'submitted' as const,
-  message: 'Deine Zeichnung ist abgegeben. Das Ergebnis steht in der Zeichenfläche; ist die KI unsicher, prüft es noch eine Person.',
+  message: 'Ihre Zeichnung ist abgegeben. Das Ergebnis steht in der Zeichenfläche; ist die KI unsicher, prüft es noch eine Person.',
+}
+
+/** Criteria the learner did not fully meet, with the grader's text. */
+export function shortfallCriteria(criteria: PracticeCriterion[] | undefined): Array<{ id: string; description: string; feedback: string }> {
+  return (criteria ?? [])
+    .filter((c) => typeof c.score === 'number' && c.score < 1)
+    .map((c) => ({ id: c.criterion_id, description: c.description, feedback: c.feedback }))
 }
 
 export function practiceTask(task: PracticeTask): LearningTask {
-  const evidence = task.source_refs.map((ref, index) => {
-    const { title, locator } = evidenceTitle(ref)
-    return { id: `source-${index}`, title, locator, supported: true }
-  })
+  const seen = new Set<string>()
+  const evidence = task.source_refs
+    .map((ref, index) => {
+      const { title, locator } = evidenceTitle(ref)
+      return { id: `source-${index}`, title, locator, supported: true }
+    })
+    .filter((item) => (seen.has(item.title) ? false : (seen.add(item.title), true)))
   const base = { id: task.id, prompt: task.prompt, evidence, math: task.presentation?.math === true }
   if (task.type === 'single_choice' || task.type === 'multiple_choice') {
     return { ...base, type: 'multiple_choice', options: task.options, multiple: task.type === 'multiple_choice' }
@@ -89,6 +99,12 @@ function box(value: unknown): Box | undefined {
   return finite(x) && finite(y) && positive(w) && positive(h) ? { x, y, w, h } : undefined
 }
 
+function withCriteria<F extends object>(feedback: F | undefined, criteria: PracticeCriterion[] | undefined) {
+  if (!feedback) return feedback
+  const shortfall = shortfallCriteria(criteria)
+  return shortfall.length ? { ...feedback, criteria: shortfall } : feedback
+}
+
 /** The engine's turn as the Learning Player shows it. */
 export function practiceModel(
   turn: PracticeTurn | null,
@@ -113,9 +129,12 @@ export function practiceModel(
     mode: turn.mode,
     sessionProgress: { completed: turn.progress.completed, total: turn.progress.total },
     task: task?.type === 'canvas' && canvas ? { ...task, canvasUrl: canvas.url } : task,
-    feedback: feedback && turn.feedback?.mastery_applied && !canvas?.submitted
-      ? { ...feedback, message: `${feedback.message} Dein Lernstand ist aktualisiert.` }
-      : feedback,
+    feedback: withCriteria(
+      feedback && turn.feedback?.mastery_applied && !canvas?.submitted
+        ? { ...feedback, message: `${feedback.message} Ihr Lernstand ist aktualisiert.` }
+        : feedback,
+      canvas?.submitted ? undefined : turn.feedback?.criteria,
+    ),
     hint: extra.hint,
     summary: done ? { attempted: turn.summary!.attempted, correct: turn.summary!.correct, score: turn.summary!.score } : undefined,
     busy: extra.busy,

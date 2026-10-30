@@ -200,4 +200,34 @@ describe('answerFromForm numeric', () => {
     expect(answerFromForm(task, form('zwei'))).toBeNull()
     expect(answerFromForm(task, form(''))).toBeNull()
   })
+
+  test('shows only criteria below 100 % with the grader text', () => {
+    const model = practiceModel(turn({
+      feedback: {
+        state: 'partial', score: 0.5,
+        criteria: [
+          { criterion_id: 'c1', description: 'Ansatz', score: 1, feedback: 'passt' },
+          { criterion_id: 'c2', description: 'Rechenweg', score: 0.4, feedback: 'Der Faktor $2$ fehlt.' },
+        ],
+      },
+    }), { mode: 'training' })
+    expect(model.feedback?.criteria).toEqual([{ id: 'c2', description: 'Rechenweg', feedback: 'Der Faktor $2$ fehlt.' }])
+    expect(practiceModel(turn({ feedback: { state: 'incorrect', score: 0 } }), { mode: 'training' }).feedback?.criteria).toBeUndefined()
+  })
+
+  test('drops evidence duplicates with the same title', () => {
+    const other = JSON.stringify({ locator: { heading: 'Anderes' }, content: 'x' })
+    const task = { ...turn().task!, source_refs: [ref, ref, other] }
+    expect(practiceTask(task).evidence.map((e) => e.title)).toEqual(['Vor der Arbeit', 'Anderes'])
+  })
+
+  test('learner texts avoid the informal du-form', () => {
+    const texts = ['correct', 'partial', 'incorrect', 'needs_review'].map((state) => {
+      const m = practiceModel(turn({ feedback: { state: state as 'correct', score: 1, mastery_applied: true } }), { mode: 'training' })
+      return m.feedback!.message
+    })
+    const canvas = practiceModel(turn(), { mode: 'training', canvas: { taskId: 't1', url: 'u', submitted: true } })
+    texts.push(canvas.feedback!.message)
+    for (const text of texts) expect(text).not.toMatch(/(du|dein\w*|dir|dich|schau)/i)
+  })
 })

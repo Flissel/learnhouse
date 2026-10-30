@@ -22,10 +22,20 @@ export interface PracticeTask {
   presentation?: Record<string, unknown>
 }
 
+export interface PracticeCriterion {
+  criterion_id: string
+  description: string
+  /** 0..1 */
+  score: number
+  feedback: string
+}
+
 export interface PracticeFeedback {
   state: 'correct' | 'incorrect' | 'partial' | 'needs_review'
   score: number
   mastery_applied?: boolean
+  /** Per-criterion grader feedback; absent or empty for deterministic types. */
+  criteria?: PracticeCriterion[]
 }
 
 export interface PracticeTurn {
@@ -155,7 +165,7 @@ export function evidenceTitle(ref: string): { title: string; locator?: string } 
     const parsed = JSON.parse(ref)
     const heading = parsed?.locator?.heading ?? parsed?.locator?.section
     const content = typeof parsed?.content === 'string' ? parsed.content : undefined
-    return { title: typeof heading === 'string' ? heading : 'Kursmaterial', locator: content?.slice(0, 160) }
+    return { title: typeof heading === 'string' ? heading : 'Kursmaterial', locator: content?.slice(0, 400) }
   } catch {
     return { title: 'Kursmaterial' }
   }

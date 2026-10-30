@@ -79,7 +79,7 @@ export default function AgentPanel({ course, state, visibleOnCompact, onAsk, tut
                 id="tutor-question"
                 maxLength={2000}
                 name="question"
-                placeholder="Was verstehst du nicht?"
+                placeholder="Was verstehen Sie nicht?"
               />
               <button
                 className="inline-flex h-9 items-center justify-center rounded-md bg-zinc-950 px-3 text-sm font-semibold text-white disabled:opacity-50"
@@ -90,7 +90,7 @@ export default function AgentPanel({ course, state, visibleOnCompact, onAsk, tut
               </button>
             </form>
           ) : (
-            <p className="mt-2 text-sm text-zinc-600">Starte eine Lernsitzung, dann hilft dir der Tutor bei der offenen Aufgabe.</p>
+            <p className="mt-2 text-sm text-zinc-600">Starte eine Lernsitzung, dann hilft Ihnen der Tutor bei der offenen Aufgabe.</p>
           )}
           {tutor ? (
             <div className="mt-3 rounded-md bg-emerald-50 px-3 py-3 text-sm leading-6 text-zinc-800">

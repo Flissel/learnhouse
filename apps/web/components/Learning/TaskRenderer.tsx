@@ -342,7 +342,7 @@ export default function TaskRenderer({ task, submitLabel, onSubmit, onOpenCanvas
           />
         ) : task.type === 'canvas' && onOpenCanvas ? (
           <div className="border-s-4 border-cyan-600 bg-cyan-50 px-4 py-4">
-            <p className="text-sm text-zinc-700">Zeichne deine Lösung auf der Zeichenfläche; du gibst sie dort selbst ab.</p>
+            <p className="text-sm text-zinc-700">Zeichnen Sie Ihre Lösung auf der Zeichenfläche; Sie geben sie dort selbst ab.</p>
             <button
               className="mt-3 inline-flex h-10 items-center rounded-md bg-cyan-800 px-4 text-sm font-semibold text-white hover:bg-cyan-900 disabled:opacity-50"
               disabled={disabled}
@@ -355,7 +355,7 @@ export default function TaskRenderer({ task, submitLabel, onSubmit, onOpenCanvas
           </div>
         ) : task.type === 'canvas' ? (
           <div className="border-s-4 border-cyan-600 bg-cyan-50 px-4 py-4">
-            <p className="text-sm text-zinc-700">Diese Zeichenaufgabe öffnest du über den Lern-Agenten; dort zeichnest du und gibst selbst ab.</p>
+            <p className="text-sm text-zinc-700">Diese Zeichenaufgabe öffnen Sie über den Lern-Agenten; dort zeichnen Sie und geben selbst ab.</p>
             {task.canvasHref ? (
               <a className="mt-3 inline-flex text-sm font-semibold text-cyan-800 underline" href={task.canvasHref} id="answer">
                 Canvas öffnen
@@ -387,12 +387,14 @@ export default function TaskRenderer({ task, submitLabel, onSubmit, onOpenCanvas
         </button>
       )}
 
-      <section aria-labelledby="task-evidence-title" className="mt-7 border-t border-zinc-200 pt-5">
-        <h4 className="mb-3 text-xs font-semibold uppercase text-zinc-500" id="task-evidence-title">
-          Quellenbelege
-        </h4>
-        <SourceEvidence items={task.evidence} />
-      </section>
+      <details className="mt-7 border-t border-zinc-200 pt-5">
+        <summary className="cursor-pointer text-xs font-semibold uppercase text-zinc-500">
+          Quellenbelege ({task.evidence.length})
+        </summary>
+        <div className="mt-3">
+          <SourceEvidence items={task.evidence} math={task.math} />
+        </div>
+      </details>
     </form>
   )
 }

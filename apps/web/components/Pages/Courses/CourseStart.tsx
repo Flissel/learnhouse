@@ -19,7 +19,7 @@ interface CourseStartProps {
   orgslug: string
 }
 
-/** The course start as "Dein Weg": one clear next step, and the chapters as a short list
+/** The course start as "Ihr Weg": one clear next step, and the chapters as a short list
  * with their state. The course page keeps its details below. */
 export default function CourseStart({ course, trail, orgslug }: CourseStartProps) {
   const chapters = course.chapters ?? []
@@ -38,7 +38,7 @@ export default function CourseStart({ course, trail, orgslug }: CourseStartProps
     <section aria-labelledby="course-start" className="rounded-2xl border border-[#E3E5E0] bg-[#F6F5F1] p-5 text-[#17191C] sm:p-7">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <div className="text-xs font-bold uppercase tracking-[0.08em] text-[#0E6B5C]">Dein Weg</div>
+          <div className="text-xs font-bold uppercase tracking-[0.08em] text-[#0E6B5C]">Ihr Weg</div>
           <h2 className="mt-1 text-2xl font-extrabold tracking-tight" id="course-start">{course.name}</h2>
           <p className="mt-1 text-sm text-zinc-600">
             {total > 0 ? `${finished} von ${total} Schritten geschafft` : 'Dieser Kurs hat noch keine Schritte.'}
