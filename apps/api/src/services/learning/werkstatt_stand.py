@@ -209,6 +209,10 @@ async def _apply(
     # A changed title must not orphan the old chapter: Werkstatt-created chapters whose name is
     # no longer in the payload are renamed (in course order) instead of leaving an empty one.
     payload_titles = {k.titel for k in payload.kapitel}
+    # The rating chapter is matched by its exact name only: it never takes over an old chapter.
+    rating_titles = {
+        k.titel for k in payload.kapitel if any(e.art == "bewertung" for e in k.eintraege)
+    }
     link_order = {link.chapter_id: (link.order, link.id or 0) for link in course_links}
     reusable = sorted(
         (
@@ -216,6 +220,7 @@ async def _apply(
             for c in chapters.values()
             if (c.extra_metadata or {}).get("werkstatt_generated") is True
             and c.name not in payload_titles
+            and c.name not in rating_titles
         ),
         key=lambda c: link_order.get(int(c.id or 0), (10**9, 0)),
     )
@@ -224,7 +229,7 @@ async def _apply(
     seen: set[str] = set()
     for kapitel in payload.kapitel:
         chapter = chapters.get(kapitel.titel)
-        if chapter is None and reusable:
+        if chapter is None and reusable and kapitel.titel not in rating_titles:
             chapter = reusable.pop(0)
             chapters.pop(chapter.name, None)
             chapter.name = kapitel.titel

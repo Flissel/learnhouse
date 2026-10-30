@@ -685,3 +685,43 @@ async def test_werkstatt_stand_legt_bewertungsseite_an(db, monkeypatch) -> None:
     assert page.extra_metadata["learning_kind"] == "bewertung"
     assert page.name == "Wie fanden Sie diesen Kurs?"
     assert page.published is True
+
+
+@pytest.mark.asyncio
+async def test_bewertungskapitel_uebernimmt_kein_altes_kapitel(db, monkeypatch) -> None:
+    _enable_local_mode(monkeypatch)
+    bewertung = {"key": "kursbewertung", "art": "bewertung", "titel": "Wie fanden Sie diesen Kurs?"}
+    async with _mounted_learning_client(db) as client:
+        course_id, rev = await _published_course(client)
+        first = await client.put(
+            _url(course_id), headers=H,
+            json=_stand(rev, "f-alt", [
+                {"titel": "Foundations", "eintraege": [_lektion("lesson-authority", "A", "Text.")]},
+                {"titel": "C", "eintraege": [_lektion("c-1", "Alt", "Alt.")]},
+            ]),
+        )
+        assert first.status_code == 200, first.text
+        second = await client.put(
+            _url(course_id), headers=H,
+            json=_stand(rev + 1, "f-neu", [
+                {"titel": "Foundations", "eintraege": [_lektion("lesson-authority", "A", "Text.")]},
+                {"titel": "Kurs abschließen", "eintraege": [bewertung]},
+            ]),
+        )
+    assert second.status_code == 200, second.text
+    chapters = {c.name: c for c in (await db.execute(select(Chapter))).scalars().all()}
+    assert "C" in chapters, "old chapter must not be renamed into the rating chapter"
+    rating = chapters["Kurs abschließen"]
+    assert rating.id != chapters["C"].id
+    activities = {a.id: a for a in await _activities(db)}
+
+    async def keys_in(chapter: Chapter) -> list[str]:
+        links = (
+            await db.execute(select(ChapterActivity).where(ChapterActivity.chapter_id == chapter.id))
+        ).scalars().all()
+        return [activities[link.activity_id].extra_metadata.get("werkstatt_key") for link in links]
+
+    assert await keys_in(rating) == ["kursbewertung"]
+    assert await keys_in(chapters["C"]) == ["c-1"]
+    old = next(a for a in activities.values() if a.extra_metadata.get("werkstatt_key") == "c-1")
+    assert old.published is False
