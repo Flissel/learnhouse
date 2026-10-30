@@ -1,7 +1,7 @@
 // @ts-expect-error Bun supplies this runtime module; the web tsconfig intentionally omits Bun globals.
 import { describe, expect, test } from 'bun:test'
 
-import { allesSuper, cleanKeywords, prefillFrom } from './courseRatingModel'
+import { allesSuper, cleanKeywords, prefillFrom, shouldPrefill } from './courseRatingModel'
 
 describe('cleanKeywords', () => {
   test('trims and drops empty entries', () => {
@@ -33,5 +33,12 @@ describe('prefillFrom', () => {
 describe('allesSuper', () => {
   test('is a good rating without keywords', () => {
     expect(allesSuper()).toEqual({ smiley: 'gut', stichworte: [] })
+  })
+})
+
+describe('shouldPrefill', () => {
+  test('prefills only while the form is untouched', () => {
+    expect(shouldPrefill(false)).toBe(true)
+    expect(shouldPrefill(true)).toBe(false)
   })
 })

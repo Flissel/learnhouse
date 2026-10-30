@@ -36,3 +36,6 @@ export function prefillFrom(reply: RatingReply | null | undefined): { smiley: Sm
   if (!own || !own.smiley) return null
   return { smiley: own.smiley, words: [...(own.stichworte ?? []), '', '', ''].slice(0, MAX_KEYWORDS) }
 }
+
+/** A stored rating may fill the form only while the learner has not touched it. */
+export const shouldPrefill = (touched: boolean): boolean => !touched

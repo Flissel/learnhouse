@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLHSession } from '@components/Contexts/LHSessionContext'
 import { getCourseRating, submitCourseRating } from '@/services/learning/practice'
-import { allesSuper, cleanKeywords, MAX_KEYWORD_LENGTH, prefillFrom, type Smiley } from '@/lib/learning/courseRatingModel'
+import { allesSuper, cleanKeywords, MAX_KEYWORD_LENGTH, prefillFrom, shouldPrefill, type Smiley } from '@/lib/learning/courseRatingModel'
 
 interface CourseRatingProps {
   courseUuid: string
@@ -22,6 +22,7 @@ export default function CourseRating({ courseUuid }: CourseRatingProps) {
   const courseId = courseUuid.replace(/^course_/, '')
   const [smiley, setSmiley] = useState<Smiley | null>(null)
   const [words, setWords] = useState<string[]>(['', '', ''])
+  const touched = useRef(false)
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -31,7 +32,7 @@ export default function CourseRating({ courseUuid }: CourseRatingProps) {
     getCourseRating(courseId, token)
       .then((reply) => {
         const own = prefillFrom(reply)
-        if (!active || !own) return
+        if (!active || !own || !shouldPrefill(touched.current)) return
         setSmiley(own.smiley)
         setWords(own.words)
         setSaved(true)
@@ -61,6 +62,7 @@ export default function CourseRating({ courseUuid }: CourseRatingProps) {
 
   function everythingFine() {
     const payload = allesSuper()
+    touched.current = true
     setSmiley(payload.smiley)
     setWords(['', '', ''])
     void send(payload.smiley, payload.stichworte)
@@ -76,7 +78,7 @@ export default function CourseRating({ courseUuid }: CourseRatingProps) {
             type="button"
             aria-label={item.value}
             aria-pressed={smiley === item.value}
-            onClick={() => { setSmiley(item.value); setSaved(false) }}
+            onClick={() => { touched.current = true; setSmiley(item.value); setSaved(false) }}
             className={`flex-1 rounded-xl border-2 py-4 text-4xl transition ${smiley === item.value ? 'border-[#17191C] bg-white' : 'border-transparent bg-[#F6F5F1]'}`}
           >
             <span aria-hidden="true">{item.icon}</span>
@@ -91,7 +93,7 @@ export default function CourseRating({ courseUuid }: CourseRatingProps) {
             type="text"
             value={word}
             maxLength={MAX_KEYWORD_LENGTH}
-            onChange={(event) => { setWords(words.map((w, i) => (i === index ? event.target.value : w))); setSaved(false) }}
+            onChange={(event) => { touched.current = true; setWords(words.map((w, i) => (i === index ? event.target.value : w))); setSaved(false) }}
             className="w-full rounded-lg border border-[#C9C6BC] bg-white px-3 py-2"
           />
         ))}
