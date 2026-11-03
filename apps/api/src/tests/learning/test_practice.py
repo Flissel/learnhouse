@@ -292,3 +292,81 @@ async def test_course_rating_passes_learning_error_text_and_rejects_malformed_id
     assert refused.status_code == 400
     assert refused.json()["detail"] == {"code": "zu_viele_stichworte", "message": "Bitte nennen Sie höchstens drei Stichworte."}
     assert malformed.status_code == 404
+
+
+async def _course_and_person(db, monkeypatch):
+    _enable_local_mode(monkeypatch)
+    async with _mounted_learning_client(db) as service:
+        created = await service.post(
+            "/api/v1/learning/courses",
+            headers={SERVICE_HEADER: SERVICE_KEY},
+            json={"title": "Resume target", "description": "", "about": ""},
+        )
+    course = created.json()["course"]
+    owner = (await db.execute(select(User))).scalars().first()
+    return course, owner, PublicUser.model_validate(owner, from_attributes=True)
+
+
+@pytest.mark.asyncio
+async def test_resume_ruft_lesendes_werkzeug_mit_revision(db, monkeypatch) -> None:
+    calls = []
+    session = {"session_id": str(uuid4()), "mode": "training"}
+
+    async def fake_call(tool, event, *, write=False, fresh=False):
+        calls.append((tool, event, write, fresh))
+        return {"state": None, "result": {"session": session}, "evidence": None}
+
+    course, owner, person = await _course_and_person(db, monkeypatch)
+    monkeypatch.setattr(practice, "_call", fake_call)
+    org_id = (await db.execute(select(UserOrganization.org_id).where(UserOrganization.user_id == owner.id))).scalars().first()
+
+    async with _practice_client(db, person) as client:
+        resumed = await client.post("/api/v1/learning/practice/sessions/resume",
+                                    json={"course_id": course["course_id"], "mode": "training"})
+
+    assert resumed.status_code == 200
+    assert resumed.json()["result"]["session"] == session
+    tool, event, write, fresh = calls[0]
+    assert tool == "learning_session_resume" and write is False and fresh is False
+    assert event["actor"] == {"actor_id": f"lh-{org_id}-{owner.user_uuid}", "actor_type": "local_user"}
+    assert event["course_id"] == course["course_id"]
+    assert isinstance(event["payload"]["course_revision"], int)
+    assert set(event["payload"]) == {"course_revision"}
+
+
+@pytest.mark.asyncio
+async def test_resume_ohne_lesezugriff_403(db, monkeypatch) -> None:
+    calls = []
+
+    async def fake_call(tool, event, *, write=False, fresh=False):
+        calls.append(tool)
+        return {"state": None, "result": {"session": None}, "evidence": None}
+
+    course, owner, _ = await _course_and_person(db, monkeypatch)
+    monkeypatch.setattr(practice, "_call", fake_call)
+    async with _practice_client(db, AnonymousUser()) as anonymous:
+        refused = await anonymous.post("/api/v1/learning/practice/sessions/resume",
+                                       json={"course_id": course["course_id"]})
+    stranger = PublicUser.model_validate(owner, from_attributes=True).model_copy(update={"id": 987654})
+    async with _practice_client(db, stranger) as client:
+        denied = await client.post("/api/v1/learning/practice/sessions/resume",
+                                   json={"course_id": course["course_id"]})
+
+    assert refused.status_code == 401
+    assert denied.status_code in (403, 404)
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_resume_ohne_sitzung_liefert_null(db, monkeypatch) -> None:
+    async def fake_call(tool, event, *, write=False, fresh=False):
+        return {"state": None, "result": {"session": None}, "evidence": None}
+
+    course, _, person = await _course_and_person(db, monkeypatch)
+    monkeypatch.setattr(practice, "_call", fake_call)
+    async with _practice_client(db, person) as client:
+        resumed = await client.post("/api/v1/learning/practice/sessions/resume",
+                                    json={"course_id": course["course_id"], "mode": "training"})
+
+    assert resumed.status_code == 200
+    assert resumed.json()["result"]["session"] is None

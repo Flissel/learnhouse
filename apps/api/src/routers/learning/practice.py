@@ -173,6 +173,26 @@ async def start_session(
     }, write=True, fresh=True)
 
 
+@router.post("/practice/sessions/resume")
+async def resume_session(
+    payload: SessionStart,
+    request: Request,
+    current_user: PublicUser = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """The person's active session for the course, or ``result.session = null``. Read-only."""
+    user = _person(current_user)
+    course = await _course_by_public_id(db_session, payload.course_id.removeprefix("course_"))
+    await _authorize_course(request, db_session, user, course, AccessAction.READ)
+    state = await _state_for_course(db_session, course)
+    return await _call("learning_session_resume", {
+        "event_type": "learning.session.resume",
+        "actor": _actor(user, await _org_of(db_session, user)),
+        "course_id": str(UUID(course.course_uuid.removeprefix("course_"))),
+        "payload": {"course_revision": state.revision},
+    }, write=False)
+
+
 async def _org_of(db_session: AsyncSession, user: PublicUser) -> int:
     """The person's organisation, from the server; never taken from the browser."""
     org_id = (

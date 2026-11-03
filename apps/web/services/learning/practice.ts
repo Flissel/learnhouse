@@ -1,3 +1,4 @@
+import { resumedTurn } from '@/lib/learning/resumeModel'
 import type { RatingReply, StoredRating } from '@/lib/learning/courseRatingModel'
 import { getAPIUrl } from '@services/config/config'
 import { RequestBodyWithAuthHeader, secureFetch } from '@services/utils/ts/requests'
@@ -53,7 +54,7 @@ export interface PracticeTurn {
 export interface PracticeReply {
   state: string | null
   result: {
-    session?: PracticeTurn
+    session?: PracticeTurn | null
     hint?: unknown
     tutor?: { answer: string; next_step: string; source_refs?: string[] }
   }
@@ -83,6 +84,10 @@ async function call<T = PracticeReply>(path: string, method: 'GET' | 'POST' | 'P
 
 export const startPractice = (courseId: string, mode: 'training' | 'exam', token?: string) =>
   call('sessions', 'POST', token, { course_id: courseId, mode })
+
+/** The active training session of this person for the course, or null when there is none. */
+export const resumePractice = async (courseId: string, token?: string): Promise<PracticeTurn | null> =>
+  resumedTurn(await call('sessions/resume', 'POST', token, { course_id: courseId, mode: 'training' }))
 
 export const currentPractice = (sessionId: string, token?: string) =>
   call(`sessions/${encodeURIComponent(sessionId)}`, 'GET', token)

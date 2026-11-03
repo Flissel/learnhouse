@@ -10,6 +10,7 @@ import {
   hintPractice,
   hintText,
   openPracticeCanvas,
+  resumePractice,
   startPractice,
   type PracticeAnswer,
   type PracticeTurn,
@@ -36,7 +37,22 @@ export function usePracticeSession(courseId: string | null) {
   // Another course: its own session.
   useEffect(() => {
     setState({ turn: null, busy: false })
-  }, [courseId])
+    if (!courseId || !token) return
+    // Continue the active session (shared with other surfaces); without one, nothing changes.
+    let current = true
+    ;(async () => {
+      try {
+        const resumed = await resumePractice(courseId, token)
+        if (!resumed) return
+        const loaded = await currentPractice(resumed.session_id, token)
+        if (current) setState((s) => (s.turn ? s : { turn: loaded.result.session ?? resumed, busy: false }))
+      } catch {
+        // Resuming is optional: the start button still works.
+      }
+    })()
+    return () => { current = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courseId, Boolean(token)])
 
   const run = useCallback(async (work: () => Promise<Partial<PracticeState>>) => {
     setState((s) => ({ ...s, busy: true, error: undefined }))
