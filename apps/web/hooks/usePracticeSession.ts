@@ -21,7 +21,7 @@ export interface PracticeState {
   // The engine answers with the next task already chosen; it waits here until "next".
   pending?: PracticeTurn | null
   hint?: string
-  tutor?: { answer: string; nextStep: string }
+  tutor?: { answer: string }
   // Drawing page of the current canvas task, and whether the drawing was submitted there.
   canvas?: { taskId: string; url: string; submitted: boolean }
   busy: boolean
@@ -124,7 +124,8 @@ export function usePracticeSession(courseId: string | null) {
     if (!tutor) throw new Error('Der Tutor hat nicht geantwortet.')
     // The tutor cites sources by internal keys (S1, S2); the learner sees the evidence instead.
     const plain = (text: string) => text.replace(/\s*\((?:S\d+(?:,\s*)?)+\)/g, '').replace(/\bS\d+\b/g, 'der Quelle')
-    return { tutor: { answer: plain(tutor.answer), nextStep: plain(tutor.next_step) } }
+    // Only the answer reaches the learner (see AgentPanel): the answer already ends with a question.
+    return { tutor: { answer: plain(tutor.answer) } }
   }), [courseId, run, state.turn, token])
 
   return { state, start, submit, next, hint, ask, openCanvas, signedIn: Boolean(token) }

@@ -9,7 +9,8 @@ interface AgentPanelProps {
   visibleOnCompact: boolean
   // Tutor for the open practice task; absent without a session.
   onAsk?: (_question: string) => void
-  tutor?: { answer: string; nextStep: string }
+  // Only the answer: Learning's next_step is at times written to a teacher and names expected values.
+  tutor?: { answer: string }
   busy?: boolean
 }
 
@@ -95,7 +96,6 @@ export default function AgentPanel({ course, state, visibleOnCompact, onAsk, tut
           {tutor ? (
             <div className="mt-3 rounded-md bg-emerald-50 px-3 py-3 text-sm leading-6 text-zinc-800">
               <p>{tutor.answer}</p>
-              <p className="mt-2 text-xs text-zinc-600"><strong>Nächster Schritt:</strong> {tutor.nextStep}</p>
             </div>
           ) : null}
         </section>
