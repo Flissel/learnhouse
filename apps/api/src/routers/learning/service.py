@@ -46,12 +46,12 @@ from src.services.learning.werkstatt_stand import (
     WerkstattStandWrite,
     apply_werkstatt_stand,
 )
+from src.services.learning.kurs_kennung import _COURSE_PREFIX, _course_id, _stable_uuid
 
 
 LOCAL_LEARNING_SERVICE_KEY_ENV = "LEARNHOUSE_LEARNING_SERVICE_KEY"
 LOCAL_LEARNING_SERVICE_HEADER = "X-LearnHouse-Learning-Service-Key"
 LOCAL_LEARNING_SERVICE_KEY_MIN_LENGTH = 32
-_COURSE_PREFIX = "course_"
 _CHAPTER_PREFIX = "chapter_"
 
 router = APIRouter()
@@ -165,21 +165,6 @@ async def _local_owner(db_session: AsyncSession) -> tuple[PublicUser, int]:
         PublicUser.model_validate(provisioned.user),
         int(provisioned.organization.id or 0),
     )
-
-
-def _stable_uuid(value: str, prefix: str) -> str:
-    raw = value[len(prefix) :] if value.startswith(prefix) else value
-    try:
-        return str(UUID(raw))
-    except ValueError as error:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Local learning resource has an invalid stable identifier",
-        ) from error
-
-
-def _course_id(course: Course) -> str:
-    return _stable_uuid(course.course_uuid, _COURSE_PREFIX)
 
 
 def _chapter_id(chapter: Chapter) -> str:
