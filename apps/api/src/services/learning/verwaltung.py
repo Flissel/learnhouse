@@ -27,7 +27,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.courses.courses import Course
-from src.db.learning.teil_b import LearningGruppe, LearningLink
+from src.db.learning.teil_b import LearningEntfernung, LearningGruppe, LearningLink
 from src.db.organizations import Organization
 from src.db.user_organizations import UserOrganization
 from src.db.usergroup_resources import UserGroupResource
@@ -245,6 +245,10 @@ async def link_einloesen(
     user_id = user.id
     link, gruppe = await gueltiger_link(db, token, jetzt)
     org_id = link.org_id
+    # A link created before the person's removal from this provider does not readmit her.
+    vermerk = await db.get(LearningEntfernung, (user_id, org_id))
+    if vermerk is not None and _utc(vermerk.entfernt_am) >= _utc(link.erstellt_am):
+        raise LinkUngueltig("zurueckgezogen")
     neue_rolle = _LINK_ROLLE[link.art]
     jetzt_text = str(datetime.now())
 
@@ -326,6 +330,10 @@ async def gruppe_anlegen(
     ).scalars().first()
     if kurs is None:
         raise Verweigert()
+    try:
+        _course_id(kurs)  # only courses with a stable Learning id; checked before any write
+    except HTTPException:
+        raise Verweigert() from None
     name = name.strip()
     if not name:
         raise ValueError("group name is empty")
@@ -381,12 +389,16 @@ async def gruppe_schliessen(db: AsyncSession, akteur: Person, gruppe_id: int) ->
         await db.commit()
 
 
-async def person_entfernen(db: AsyncSession, akteur: Person, org_id: int, user_id: int) -> None:
+async def person_entfernen(
+    db: AsyncSession, akteur: Person, org_id: int, user_id: int, jetzt: datetime | None = None
+) -> None:
     """Remove a person from the provider and all its groups; ``learning_person`` stays.
 
     Protection rules: Root cannot be removed, a Kursleiter cannot remove an Admin, and the
-    last Admin of a provider stays."""
+    last Admin of a provider stays. A removal note (``learning_entfernung``) keeps links
+    created before the removal from readmitting her; a link created afterwards does."""
     akteur_id = akteur.id
+    jetzt = _utc(jetzt)
     akteur_rolle = await _darf_verwalten(db, akteur_id, org_id)
     if await _ist_root(db, user_id):
         raise Verweigert(ROOT_BLEIBT)
@@ -421,6 +433,11 @@ async def person_entfernen(db: AsyncSession, akteur: Person, org_id: int, user_i
             UserOrganization.user_id == user_id, UserOrganization.org_id == org_id
         )
     )
+    vermerk = await db.get(LearningEntfernung, (user_id, org_id))
+    if vermerk is None:
+        db.add(LearningEntfernung(user_id=user_id, org_id=org_id, entfernt_am=jetzt))
+    else:
+        vermerk.entfernt_am = jetzt
     await db.commit()
     _invalidate_session(user_id)
 

@@ -1,4 +1,5 @@
-"""Learning Teil B: fixed learner id per account, learning groups and invitation links.
+"""Learning Teil B: fixed learner id per account, learning groups, invitation links and
+removal notes (links older than a removal do not readmit the removed person).
 
 Revision ID: bbfd7dc8ca72
 Revises: d0e1f2a3b4c5
@@ -82,11 +83,29 @@ def upgrade() -> None:
         )
         op.create_index("ix_learning_link_org_id", "learning_link", ["org_id"])
 
+    if "learning_entfernung" not in tables:
+        op.create_table(
+            "learning_entfernung",
+            sa.Column("user_id", sa.Integer(), nullable=False, autoincrement=False),
+            sa.Column("org_id", sa.Integer(), nullable=False, autoincrement=False),
+            sa.Column(
+                "entfernt_am",
+                sa.DateTime(timezone=True),
+                nullable=False,
+                server_default=sa.text("CURRENT_TIMESTAMP"),
+            ),
+            sa.PrimaryKeyConstraint("user_id", "org_id"),
+            sa.ForeignKeyConstraint(["user_id"], ["user.id"], ondelete="CASCADE"),
+            sa.ForeignKeyConstraint(["org_id"], ["organization.id"], ondelete="CASCADE"),
+        )
+
 
 def downgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
     tables = set(inspector.get_table_names())
+    if "learning_entfernung" in tables:
+        op.drop_table("learning_entfernung")
     if "learning_link" in tables:
         op.drop_index("ix_learning_link_org_id", table_name="learning_link")
         op.drop_table("learning_link")

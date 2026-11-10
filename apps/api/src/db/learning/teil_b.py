@@ -113,3 +113,28 @@ class LearningLink(SQLModel, table=True):
     zurueckgezogen_am: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
+
+
+class LearningEntfernung(SQLModel, table=True):
+    """A person was removed from a provider; links created before ``entfernt_am`` no longer
+    admit her there. One note per person and provider, moved forward on a new removal."""
+
+    __tablename__ = "learning_entfernung"
+
+    user_id: int = Field(
+        sa_column=Column(
+            Integer, ForeignKey("user.id", ondelete="CASCADE"), primary_key=True, autoincrement=False
+        )
+    )
+    org_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("organization.id", ondelete="CASCADE"),
+            primary_key=True,
+            autoincrement=False,
+        )
+    )
+    entfernt_am: datetime = Field(
+        default_factory=_jetzt,
+        sa_column=Column(DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+    )

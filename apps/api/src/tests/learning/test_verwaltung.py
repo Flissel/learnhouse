@@ -371,3 +371,63 @@ async def test_entfernte_person_behaelt_zuordnung(db, org, leute, kurs_intern) -
     assert await kurse_der_person(db, person_a) == []
     assert (await db.get(LearningPerson, person_a.id)).actor_id == kennung
     assert await db.get(User, person_a.id) is not None
+
+
+async def _zeilen(db) -> dict[str, int]:
+    return {model.__name__: await _anzahl(db, model)
+            for model in (UserOrganization, UserGroupUser, UserGroup, LearningGruppe, LearningLink)}
+
+
+async def test_entfernte_person_kommt_mit_altem_link_nicht_zurueck(db, org, leute, kurs_intern) -> None:
+    person_a, leiter_a, neu = leute["person_a"], leute["leiter_a"], leute["neu"]
+    g, gruppen_token = await gruppe_anlegen(db, leiter_a, org.id, kurs_intern.course_uuid, "Montag", jetzt=T0)
+    _, leiter_token = await link_erzeugen(db, leiter_a, "kursleiter", org.id, jetzt=T0)
+    await link_einloesen(db, gruppen_token, person_a, jetzt=T0)
+
+    await person_entfernen(db, leiter_a, org.id, person_a.id, jetzt=T0 + timedelta(hours=1))
+    vorher = await _zeilen(db)
+
+    for token in (gruppen_token, leiter_token):
+        with pytest.raises(LinkUngueltig) as e:
+            await link_einloesen(db, token, person_a, jetzt=T0 + timedelta(hours=2))
+        assert (e.value.grund, e.value.text) == ("zurueckgezogen", LINK_ZURUECKGEZOGEN)
+    assert await _zeilen(db) == vorher
+    assert await rolle_von(db, person_a, org.id) is None
+    assert not await _in_gruppe(db, person_a.id, g)
+
+    # Everyone else keeps using the old group link.
+    e = await link_einloesen(db, gruppen_token, neu, jetzt=T0 + timedelta(hours=2))
+    assert e.rolle is Rolle.TEILNEHMEND and await _in_gruppe(db, neu.id, g)
+
+
+async def test_neu_erstellter_link_holt_entfernte_person_zurueck(db, org, leute, kurs_intern) -> None:
+    person_a, leiter_a = leute["person_a"], leute["leiter_a"]
+    await person_entfernen(db, leiter_a, org.id, person_a.id, jetzt=T0)
+    # A second removal only moves the note forward (one note per person and provider).
+    _, t = await link_erzeugen(db, leiter_a, "kursleiter", org.id, jetzt=T0 + timedelta(hours=1))
+    await link_einloesen(db, t, person_a, jetzt=T0 + timedelta(hours=1))
+    await person_entfernen(db, leiter_a, org.id, person_a.id, jetzt=T0 + timedelta(hours=2))
+    with pytest.raises(LinkUngueltig, match=LINK_ZURUECKGEZOGEN):
+        await link_einloesen(db, t, person_a, jetzt=T0 + timedelta(hours=3))
+
+    g, neuer_token = await gruppe_anlegen(db, leiter_a, org.id, kurs_intern.course_uuid, "Dienstag",
+                                          jetzt=T0 + timedelta(hours=3))
+    e = await link_einloesen(db, neuer_token, person_a, jetzt=T0 + timedelta(hours=4))
+    assert e.rolle is Rolle.TEILNEHMEND and e.gruppe_id == g.id
+    assert await rolle_von(db, person_a, org.id) is Rolle.TEILNEHMEND
+    assert await _in_gruppe(db, person_a.id, g)
+
+
+async def test_gruppe_nur_fuer_kurs_mit_learning_kennung(db, org, leute) -> None:
+    now = str(datetime.now())
+    kaputt = Course(id=104, name="Ohne Kennung", public=False, published=True, open_to_contributors=False,
+                    org_id=org.id, course_uuid="course_keine-uuid", creation_date=now, update_date=now)
+    db.add(kaputt)
+    await db.commit()
+    vorher = await _zeilen(db)
+
+    with pytest.raises(Verweigert) as e:
+        await gruppe_anlegen(db, leute["leiter_a"], org.id, "course_keine-uuid", "Montag")
+    assert e.value.text == NICHT_ERLAUBT
+    assert await _zeilen(db) == vorher
+    assert await _anzahl(db, UserGroupResource) == 0
