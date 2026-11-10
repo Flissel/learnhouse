@@ -249,9 +249,11 @@ async def create_org(
     db_session: AsyncSession,
     *,
     allow_multi_org: bool = False,
+    skip_free_org_cap: bool = False,
 ):
-    # EE gating: only allow multiple orgs with Enterprise Edition. ``allow_multi_org`` is
-    # set only by the learning-mode provider route (bootstrap key and superadmin).
+    # EE gating: only allow multiple orgs with Enterprise Edition. ``allow_multi_org`` and
+    # ``skip_free_org_cap`` are set only by the learning-mode provider route (bootstrap key
+    # and superadmin); every other caller keeps both limits.
     if not allow_multi_org and not is_multi_org_allowed():
         existing_org = (await db_session.execute(select(Organization).limit(1))).scalars().first()
         if existing_org is not None:
@@ -277,7 +279,8 @@ async def create_org(
             detail="You should be logged in to be able to achieve this action",
         )
 
-    await _enforce_free_org_cap(current_user, db_session)
+    if not skip_free_org_cap:
+        await _enforce_free_org_cap(current_user, db_session)
 
     # Complete the org object
     org.org_uuid = f"org_{uuid4()}"

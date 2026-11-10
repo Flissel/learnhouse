@@ -31,8 +31,13 @@ def _b64(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode().rstrip("=")
 
 
+def _bytes(text: str) -> bytes:
+    """Any string from a URL as bytes (also lone surrogates), so a foreign token reads as invalid."""
+    return text.encode("utf-8", "surrogatepass")
+
+
 def _signature(payload: str, key: str | None) -> str:
-    return hmac.new(_key(key), payload.encode(), hashlib.sha256).hexdigest()[:48]
+    return hmac.new(_key(key), _bytes(payload), hashlib.sha256).hexdigest()[:48]
 
 
 def person_token(actor_id: str, *, key: str | None = None, now: float | None = None) -> str:
@@ -46,7 +51,7 @@ def person_token(actor_id: str, *, key: str | None = None, now: float | None = N
 def read_person_token(token: str, *, key: str | None = None, now: float | None = None) -> str:
     """The learner id of a valid token; ``LookupError("expired")`` or ``LookupError("invalid")``."""
     payload, _, signature = token.partition(".")
-    if not payload or not hmac.compare_digest(_signature(payload, key), signature):
+    if not payload or not hmac.compare_digest(_signature(payload, key).encode(), _bytes(signature)):
         raise LookupError("invalid")
     try:
         actor_id, _, expires = base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)).decode().rpartition("|")

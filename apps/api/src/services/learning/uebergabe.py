@@ -17,7 +17,7 @@ import os
 import time
 from uuid import UUID
 
-from src.services.learning.person_token import _ACTOR, KEY_ENV
+from src.services.learning.person_token import _ACTOR, KEY_ENV, _bytes
 
 TTL_SECONDS = 120
 _LABEL = b"uebergabe:"
@@ -35,7 +35,7 @@ def _b64(data: bytes) -> str:
 
 
 def _signature(payload: str, key: str | None) -> str:
-    return hmac.new(_key(key), payload.encode(), hashlib.sha256).hexdigest()[:48]
+    return hmac.new(_key(key), _bytes(payload), hashlib.sha256).hexdigest()[:48]
 
 
 def _ist_course_id(course_id: str) -> bool:
@@ -63,7 +63,7 @@ def read_uebergabe_token(
     """``(actor_id, course_id or None)`` of a valid token; ``LookupError("expired")`` or
     ``LookupError("invalid")``."""
     payload, _, signature = token.partition(".")
-    if not payload or not hmac.compare_digest(_signature(payload, key), signature):
+    if not payload or not hmac.compare_digest(_signature(payload, key).encode(), _bytes(signature)):
         raise LookupError("invalid")
     try:
         raw = base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)).decode()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack, asynccontextmanager
+from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -17,7 +18,9 @@ import src.routers.learning.service as service_routen
 import src.routers.learning.verwaltung as verwaltung_routen
 from src.core.events.database import get_db_session
 from src.db.learning.teil_b import LearningLink
+from src.db.organization_config import OrganizationConfig
 from src.db.organizations import Organization, OrganizationCreate
+from src.db.user_organizations import UserOrganization
 from src.db.users import User
 from src.security.auth import JWT_COOKIE_NAME, decode_jwt, get_authenticated_user
 from src.services.learning.kurs_kennung import _course_id
@@ -109,6 +112,7 @@ def _ohne_nebenwirkungen() -> ExitStack:
         ("src.services.users.users.send_account_creation_email", {}),
         ("src.services.orgs.orgs._try_send_org_created", {"new_callable": AsyncMock}),
         ("src.services.orgs.orgs._try_record_org_admin_in_loops", {}),
+        ("src.routers.learning.verwaltung.check_invite_acceptance_rate_limit", {"return_value": (True, 0)}),
     ]:
         stack.enter_context(patch(ziel, **kwargs))
     return stack
@@ -390,3 +394,81 @@ async def test_anbieter_nur_root_mit_bootstrap(db, org, org2, leute, lernmodus, 
     assert (await db.execute(select(LearningLink.art).where(LearningLink.org_id == anbieter.id))).scalars().all() == [
         "admin"]
     assert gesperrt.value.status_code == 403
+
+
+async def _nur_diese_anmeldewege(db, org_id: int, wege: list[str]) -> None:
+    db.add(OrganizationConfig(
+        org_id=org_id,
+        config={"config_version": "2.0", "admin_toggles": {"security": {"allowed_auth_methods": wege}}},
+        creation_date=str(datetime.now()), update_date=str(datetime.now()),
+    ))
+    await db.commit()
+
+
+async def _konto_ueber_link(db, org, leute) -> tuple[str, int]:
+    wer = _Wer()
+    wer.user = leute["admin_a"]
+    async with _client(db, wer) as client:
+        erzeugt = await client.post("/api/v1/learning/verwaltung/links", json={"art": "kursleiter", "org_id": org.id})
+    return _token_aus(erzeugt.json()["url"], WEB + "/einladung/"), erzeugt.json()["link_id"]
+
+
+async def test_einladung_konto_ohne_passwort_anmeldung_abgelehnt(db, org, leute, lernmodus) -> None:
+    token, link_id = await _konto_ueber_link(db, org, leute)
+    await _nur_diese_anmeldewege(db, org.id, ["google"])
+    konten_vorher, mitglieder_vorher = await _anzahl(db, User), await _anzahl(db, UserOrganization)
+
+    wer = _Wer()
+    async with _client(db, wer) as client:
+        with _ohne_nebenwirkungen():
+            konto = await client.post(f"/api/v1/learning/einladung/{token}/konto",
+                                      json={"email": "person-f@example.com", "username": "person-f",
+                                            "password": PASSWORT})
+        vorschau = await client.get(f"/api/v1/learning/einladung/{token}")
+
+    assert konto.status_code == 403
+    assert konto.json()["detail"]["code"] == "AUTH_METHOD_NOT_ALLOWED"
+    assert konto.cookies.get(JWT_COOKIE_NAME) is None
+    assert await _anzahl(db, User) == konten_vorher
+    assert await _anzahl(db, UserOrganization) == mitglieder_vorher
+    link = await db.get(LearningLink, link_id)
+    await db.refresh(link)
+    assert link.zurueckgezogen_am is None and vorschau.status_code == 200
+
+
+async def test_einladung_konto_gedrosselt(db, org, leute, lernmodus) -> None:
+    token, _ = await _konto_ueber_link(db, org, leute)
+    konten_vorher = await _anzahl(db, User)
+
+    wer = _Wer()
+    async with _client(db, wer) as client:
+        with _ohne_nebenwirkungen(), patch(
+            "src.routers.learning.verwaltung.check_invite_acceptance_rate_limit", return_value=(False, 600)
+        ) as drossel:
+            konto = await client.post(f"/api/v1/learning/einladung/{token}/konto",
+                                      json={"email": "person-g@example.com", "username": "person-g",
+                                            "password": PASSWORT})
+
+    assert konto.status_code == 429 and konto.headers["Retry-After"] == "600"
+    assert drossel.call_args.args[1] == org.id
+    assert await _anzahl(db, User) == konten_vorher
+    assert token not in konto.text
+
+
+async def test_anbieter_im_lernmodus_ohne_free_plan_grenze(db, org, leute, lernmodus, mock_request) -> None:
+    wer = _Wer()
+    wer.user = leute["root"]
+    with _ohne_nebenwirkungen():
+        async with _client(db, wer) as client:
+            angelegt = [
+                await client.post("/api/v1/learning/anbieter", json={"name": f"Anbieter {i}", "slug": f"anbieter-{i}"},
+                                  headers={BOOTSTRAP_HEADER: BOOTSTRAP_KEY})
+                for i in range(1, 6)
+            ]
+        # Every other caller keeps the free-plan cap (Root is admin of 5 free providers now).
+        with pytest.raises(HTTPException) as begrenzt:
+            await create_org(mock_request, OrganizationCreate(name="Anbieter X", slug="anbieter-x", email=""),
+                             leute["root"], db, allow_multi_org=True)
+
+    assert [r.status_code for r in angelegt] == [200] * 5, [r.text for r in angelegt]
+    assert begrenzt.value.status_code == 403 and "Free plan" in str(begrenzt.value.detail)

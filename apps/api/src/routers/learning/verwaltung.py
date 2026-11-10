@@ -34,7 +34,9 @@ from src.services.auth.session import issue_session_or_challenge
 from src.services.learning import verwaltung as dienst
 from src.services.learning.personen import KennungVergeben, actor_von
 from src.services.learning.uebergabe import uebergabe_token
+from src.services.orgs.auth_policy import enforce_login_auth_method
 from src.services.orgs.orgs import create_org
+from src.services.security.rate_limiting import check_invite_acceptance_rate_limit
 from src.services.users.users import create_user
 
 HUELLE_BASIS_ENV = "LEARNHOUSE_LEARNING_HUELLE_BASIS"
@@ -403,6 +405,19 @@ async def post_einladung_konto(
         return _link_ungueltig(fehler)
     org_id = int(link.org_id)
 
+    # The same gates as the invite signup route (routers/users.py): throttle per IP and
+    # provider, and no password account in a provider that refuses password sign-in.
+    erlaubt, retry_after = check_invite_acceptance_rate_limit(request, org_id)
+    if not erlaubt:
+        minuten = max(1, retry_after // 60)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many invite attempts. Please try again in about {minuten} minute"
+                   f"{'s' if minuten != 1 else ''}.",
+            headers={"Retry-After": str(retry_after)},
+        )
+    await enforce_login_auth_method(db_session, org_id, AUTH_METHOD_PASSWORD)
+
     neu = await create_user(
         request, db_session, AnonymousUser(),
         UserCreate(email=payload.email, username=payload.username, password=payload.password),
@@ -463,6 +478,7 @@ async def post_anbieter(
         user,
         db_session,
         allow_multi_org=is_local_learning_mode_enabled(),
+        skip_free_org_cap=is_local_learning_mode_enabled(),
     )
     try:
         link, token = await dienst.link_erzeugen(db_session, user, "admin", int(anbieter.id))

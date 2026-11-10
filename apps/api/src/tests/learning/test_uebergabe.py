@@ -60,6 +60,20 @@ def test_uebergabe_prueft_eingaben() -> None:
         uebergabe_token("lh-1-person-a", KURS, key="zu-kurz", now=1000)
 
 
+def test_nicht_ascii_token_ist_ungueltig() -> None:
+    # A token from a URL may hold any character; "é" must read as invalid, never as a 500.
+    echt = uebergabe_token("lh-1-person-a", KURS, key=KEY, now=1000)
+    payload, _, signatur = echt.partition(".")
+    person = person_token("lh-1-person-a", key=KEY, now=1000)
+    for kaputt in (f"{payload}.{signatur[:-1]}é", f"é{payload}.{signatur}", "é.é", f"{payload}.\udce9", f"\udce9{payload}.{signatur}"):
+        with pytest.raises(LookupError, match="invalid"):
+            read_uebergabe_token(kaputt, key=KEY, now=1000)
+    p_payload, _, p_signatur = person.partition(".")
+    for kaputt in (f"{p_payload}.{p_signatur[:-1]}é", f"é{p_payload}.{p_signatur}", "é.é", f"{p_payload}.\udce9", f"\udce9{p_payload}.{p_signatur}"):
+        with pytest.raises(LookupError, match="invalid"):
+            read_person_token(kaputt, key=KEY, now=1000)
+
+
 def test_uebergabe_label_getrennt() -> None:
     uebergabe = uebergabe_token("lh-1-person-a", KURS, key=KEY, now=1000)
     person = person_token("lh-1-person-a", key=KEY, now=1000)
