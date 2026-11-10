@@ -402,6 +402,22 @@ export default async function proxy(req: NextRequest) {
     return response
   }
 
+  // Invitation links of the learning area (/einladung/<token>) name their provider
+  // themselves, so the page lives outside /orgs/{slug}. Without this pass-through the
+  // tenant catch-all rewrote them to /orgs/{slug}/einladung/… and they 404'd. Tenant
+  // cookies are still set so "Ich habe schon ein Konto" → /login keeps its org context.
+  if (pathname.startsWith('/einladung/')) {
+    const resolved = await resolveTenant(req, instance)
+    const requestHeaders = tenantRequestHeaders(req, resolved, instance)
+    const response = NextResponse.rewrite(
+      new URL(`${pathname}${search}`, req.url),
+      { request: { headers: requestHeaders } },
+    )
+    setOrgCookies(response, resolved, instance)
+    setInstanceCookies(response, instance)
+    return response
+  }
+
   // -------------------------------------------------------------------------
   // 5. Standalone editors / boards — bypass org rewrite
   // -------------------------------------------------------------------------

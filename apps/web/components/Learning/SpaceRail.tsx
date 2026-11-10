@@ -1,15 +1,21 @@
-import { BarChart3, BookOpenCheck, Library, StickyNote } from 'lucide-react'
+import { BarChart3, BookOpenCheck, Library, StickyNote, UsersRound } from 'lucide-react'
 
 interface SpaceRailProps {
   coursesHref: string
   learningHref: string
   notesHref?: string
+  /** Only for admins, course leaders and root; participants get no entry. */
+  verwaltungHref?: string
+  active?: 'learning' | 'verwaltung'
 }
 
 const railLink =
   'group flex h-14 w-14 flex-col items-center justify-center gap-1 rounded-md text-[10px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2'
+const railActive = 'bg-emerald-500 text-zinc-950'
+const railIdle = 'text-zinc-400 hover:bg-zinc-800 hover:text-white'
 
-export default function SpaceRail({ coursesHref, learningHref, notesHref }: SpaceRailProps) {
+export default function SpaceRail({ coursesHref, learningHref, notesHref, verwaltungHref, active = 'learning' }: SpaceRailProps) {
+  const verwaltungActive = active === 'verwaltung' && Boolean(verwaltungHref)
   return (
     <nav
       aria-label="VibeMind Spaces"
@@ -17,8 +23,8 @@ export default function SpaceRail({ coursesHref, learningHref, notesHref }: Spac
       data-testid="space-rail"
     >
       <a
-        aria-current="page"
-        className={`${railLink} bg-emerald-500 text-zinc-950`}
+        aria-current={verwaltungActive ? undefined : 'page'}
+        className={`${railLink} ${verwaltungActive ? railIdle : railActive}`}
         href={learningHref}
         title="Lernen"
       >
@@ -41,6 +47,17 @@ export default function SpaceRail({ coursesHref, learningHref, notesHref }: Spac
         >
           <StickyNote aria-hidden="true" size={19} strokeWidth={2} />
           <span>Notizen</span>
+        </a>
+      ) : null}
+      {verwaltungHref ? (
+        <a
+          aria-current={verwaltungActive ? 'page' : undefined}
+          className={`${railLink} mt-2 ${verwaltungActive ? railActive : railIdle}`}
+          href={verwaltungHref}
+          title="Verwaltung"
+        >
+          <UsersRound aria-hidden="true" size={19} strokeWidth={2} />
+          <span>Verwaltung</span>
         </a>
       ) : null}
       <div className="mt-auto flex h-14 w-14 flex-col items-center justify-center gap-1 text-[10px] text-zinc-500">

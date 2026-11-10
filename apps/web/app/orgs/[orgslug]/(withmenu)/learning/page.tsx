@@ -5,14 +5,28 @@ import LearningShell, {
   type LearningCourse,
   type LearningShellState,
 } from '@components/Learning/LearningShell'
+import Kursuebersicht from '@components/Learning/Kursuebersicht'
 import { useCourses } from '@/hooks/queries/useCourses'
 
 interface LearningPageProps {
   params: Promise<{ orgslug: string }>
+  searchParams: Promise<Record<string, string | string[] | undefined>>
 }
 
+/**
+ * Entry of the learning area is the course overview (own Lern-Hülle per course, and the
+ * management area for admins and course leaders). `?bereich=browser` keeps the in-browser
+ * practice workspace reachable.
+ */
 export default function LearningPage(_props: LearningPageProps) {
   const { orgslug } = use(_props.params)
+  const { bereich } = use(_props.searchParams)
+
+  if (bereich === 'browser') return <BrowserLearning orgslug={orgslug} />
+  return <Kursuebersicht bereich={bereich === 'verwaltung' ? 'verwaltung' : 'kurse'} orgslug={orgslug} />
+}
+
+function BrowserLearning({ orgslug }: { orgslug: string }) {
   const query = useCourses(orgslug)
   const courses = normalizeCourses(query.data)
   let state: LearningShellState = 'ready'
