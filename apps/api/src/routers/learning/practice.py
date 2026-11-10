@@ -2,8 +2,9 @@
 
 The browser never talks to the Learning engine directly: these routes take the person
 from the LearnHouse session, check read access to the course and forward the action to
-learning-mcp with the person as learner (``lh-<org>-<user_uuid>``). Mastery is therefore
-per person and per organisation (one instance, one organisation per customer).
+learning-mcp with the person as learner: the account's fixed ``actor_id`` from
+``learning_person`` (first created as ``lh-<org>-<user_uuid>``, see
+``services/learning/personen.py``). Mastery is therefore per person.
 """
 
 from __future__ import annotations
@@ -19,11 +20,9 @@ from uuid import UUID, uuid4
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.events.database import get_db_session
-from src.db.user_organizations import UserOrganization
 from src.db.users import PublicUser
 from src.routers.learning.service import (
     LOCAL_LEARNING_SERVICE_KEY_ENV,
@@ -33,11 +32,11 @@ from src.routers.learning.service import (
 )
 from src.security.auth import get_current_user
 from src.security.rbac import AccessAction
+from src.services.learning.personen import KennungVergeben, _org_of, actor_von, learner_id  # noqa: F401
 
 router = APIRouter()
 MCP_URL_ENV = "LEARNING_MCP_URL"
 _TIMEOUT_S = 660.0
-_UNSAFE = re.compile(r"[^A-Za-z0-9._:-]")
 
 
 class _Strict(BaseModel):
@@ -75,12 +74,6 @@ class CourseRatingWrite(_Strict):
     course_id: str = Field(min_length=1, max_length=80)
     smiley: Literal["gut", "mittel", "schlecht"]
     stichworte: list[str] = Field(default_factory=list, max_length=20)
-
-
-def learner_id(user: PublicUser, org_id: int | None) -> str:
-    """The person as Learning learner; same person, same id across sessions."""
-    raw = f"lh-{org_id or 0}-{user.user_uuid}"
-    return _UNSAFE.sub("-", raw)[:128]
 
 
 def _person(user: PublicUser) -> PublicUser:
@@ -149,8 +142,18 @@ def _absolute_media(result: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _actor(user: PublicUser, org_id: int | None) -> dict[str, str]:
-    return {"actor_id": learner_id(user, org_id), "actor_type": "local_user"}
+async def _kennung(db_session: AsyncSession, user: PublicUser) -> str:
+    """The person's fixed learner id (never from the browser)."""
+    try:
+        return await actor_von(db_session, user)
+    except KennungVergeben as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="learner id belongs to another account"
+        ) from error
+
+
+async def _actor(db_session: AsyncSession, user: PublicUser) -> dict[str, str]:
+    return {"actor_id": await _kennung(db_session, user), "actor_type": "local_user"}
 
 
 @router.post("/practice/sessions")
@@ -161,13 +164,14 @@ async def start_session(
     db_session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     user = _person(current_user)
+    actor = await _actor(db_session, user)
     course = await _course_by_public_id(db_session, payload.course_id.removeprefix("course_"))
     await _authorize_course(request, db_session, user, course, AccessAction.READ)
     state = await _state_for_course(db_session, course)
     blueprint = {"max_attempts": 20} if payload.mode == "training" else {"item_count": 10}
     return await _call("learning_session_start", {
         "event_type": "learning.session.start",
-        "actor": _actor(user, await _org_of(db_session, user)),
+        "actor": actor,
         "course_id": str(UUID(course.course_uuid.removeprefix("course_"))),
         "payload": {"course_revision": state.revision, "mode": payload.mode, "blueprint": blueprint},
     }, write=True, fresh=True)
@@ -182,27 +186,16 @@ async def resume_session(
 ) -> dict[str, Any]:
     """The person's active session for the course, or ``result.session = null``. Read-only."""
     user = _person(current_user)
+    actor = await _actor(db_session, user)
     course = await _course_by_public_id(db_session, payload.course_id.removeprefix("course_"))
     await _authorize_course(request, db_session, user, course, AccessAction.READ)
     state = await _state_for_course(db_session, course)
     return await _call("learning_session_resume", {
         "event_type": "learning.session.resume",
-        "actor": _actor(user, await _org_of(db_session, user)),
+        "actor": actor,
         "course_id": str(UUID(course.course_uuid.removeprefix("course_"))),
         "payload": {"course_revision": state.revision},
     }, write=False)
-
-
-async def _org_of(db_session: AsyncSession, user: PublicUser) -> int:
-    """The person's organisation, from the server; never taken from the browser."""
-    org_id = (
-        await db_session.execute(
-            select(UserOrganization.org_id).where(UserOrganization.user_id == user.id).order_by(UserOrganization.id)
-        )
-    ).scalars().first()
-    if org_id is None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="no organisation")
-    return int(org_id)
 
 
 @router.get("/practice/sessions/{session_id}")
@@ -212,9 +205,9 @@ async def current_task(
     db_session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     user = _person(current_user)
-    org_id = await _org_of(db_session, user)
+    actor = await _actor(db_session, user)
     return await _call("learning_task_next", {
-        "event_type": "learning.task.next", "actor": _actor(user, org_id), "session_id": str(session_id), "payload": {},
+        "event_type": "learning.task.next", "actor": actor, "session_id": str(session_id), "payload": {},
     })
 
 
@@ -229,7 +222,7 @@ async def player_token_for_embed(
     from src.services.learning.person_token import person_token
 
     user = _person(current_user)
-    return {"token": person_token(learner_id(user, await _org_of(db_session, user))), "origin": _player_origin()}
+    return {"token": person_token(await _kennung(db_session, user)), "origin": _player_origin()}
 
 
 def _player_origin() -> str | None:
@@ -246,9 +239,9 @@ async def answer(
     db_session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     user = _person(current_user)
-    org_id = await _org_of(db_session, user)
+    actor = await _actor(db_session, user)
     return await _call("learning_task_answer", {
-        "event_type": "learning.task.answer", "actor": _actor(user, org_id), "session_id": str(session_id),
+        "event_type": "learning.task.answer", "actor": actor, "session_id": str(session_id),
         "expected_revision": payload.revision, "payload": {"answer": payload.answer},
     }, write=True)
 
@@ -261,9 +254,9 @@ async def hint(
     db_session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     user = _person(current_user)
-    org_id = await _org_of(db_session, user)
+    actor = await _actor(db_session, user)
     return await _call("learning_hint_request", {
-        "event_type": "learning.hint.request", "actor": _actor(user, org_id), "session_id": str(session_id),
+        "event_type": "learning.hint.request", "actor": actor, "session_id": str(session_id),
         "payload": {"task_id": payload.task_id},
     })
 
@@ -277,7 +270,7 @@ async def open_canvas(
 ) -> dict[str, str]:
     """Open the drawing task; Learning answers with its signed drawing page for this person."""
     user = _person(current_user)
-    actor = _actor(user, await _org_of(db_session, user))
+    actor = await _actor(db_session, user)
     # Same reference for the same task and person: reopening shows the same canvas.
     ref = "lh-z-" + hashlib.sha256(f"{session_id}:{payload.activity_id}:{actor['actor_id']}".encode()).hexdigest()[:32]
     opened = await _call("learning_canvas_open", {
@@ -299,9 +292,9 @@ async def tutor(
     db_session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     user = _person(current_user)
-    org_id = await _org_of(db_session, user)
+    actor = await _actor(db_session, user)
     return await _call("learning_tutor_ask", {
-        "event_type": "learning.tutor.ask", "actor": _actor(user, org_id), "session_id": str(session_id),
+        "event_type": "learning.tutor.ask", "actor": actor, "session_id": str(session_id),
         "course_id": str(UUID(course_id.removeprefix("course_"))), "payload": {"question": payload.question},
     })
 
@@ -324,7 +317,7 @@ async def _notes_request(
     base = os.environ.get(NOTES_BASE_ENV, "http://learning-api:8090").rstrip("/")
     headers = {
         "X-LearnHouse-Learning-Service-Key": key,
-        "X-Learning-Actor": learner_id(user, await _org_of(db_session, user)),
+        "X-Learning-Actor": await _kennung(db_session, user),
     }
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:

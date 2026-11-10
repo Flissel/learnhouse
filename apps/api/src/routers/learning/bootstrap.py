@@ -3,7 +3,7 @@ import os
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from src.core.events.database import get_db_session
@@ -14,6 +14,7 @@ from src.core.learning_mode import (
     is_local_learning_mode_enabled,
     provision_local_learning_mode,
 )
+from src.services.learning.personen import KennungVergeben, ist_sichere_kennung, zuordnung_setzen
 
 
 router = APIRouter()
@@ -77,3 +78,44 @@ async def bootstrap_local_learning_mode(
         locale=provisioned.locale,
         permissions=list(provisioned.permissions),
     )
+
+
+class LearningPersonWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: int = Field(gt=0)
+    actor_id: str
+
+    @field_validator("actor_id")
+    @classmethod
+    def _safe_actor_id(cls, value: str) -> str:
+        if not ist_sichere_kennung(value):
+            raise ValueError("actor id is not a safe token")
+        return value
+
+
+class LearningPersonRead(BaseModel):
+    user_id: int
+    actor_id: str
+
+
+@router.post(
+    "/bootstrap/person",
+    response_model=LearningPersonRead,
+    dependencies=[Depends(require_local_learning_bootstrap)],
+)
+async def bootstrap_learning_person(
+    payload: LearningPersonWrite,
+    db_session: AsyncSession = Depends(get_db_session),
+) -> LearningPersonRead:
+    """Fix the Learning learner id of an account explicitly (setup only)."""
+    try:
+        person = await zuordnung_setzen(db_session, payload.user_id, payload.actor_id)
+    except KennungVergeben as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="actor id is already assigned to another account",
+        ) from error
+    except LookupError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found") from error
+    return LearningPersonRead(user_id=person.user_id, actor_id=person.actor_id)
