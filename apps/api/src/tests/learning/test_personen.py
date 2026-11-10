@@ -103,6 +103,21 @@ async def test_actor_von_nimmt_keine_fremde_kennung(db, person_a, person_b, org,
 
 
 @pytest.mark.asyncio
+async def test_actor_von_mit_orm_konto_nach_rollback(db, person_a, person_b, org, bootstrap_kopf) -> None:
+    # An ORM account (not PublicUser) is expired by the rollback after the conflict; the id
+    # must not be read from it afterwards (async lazy load: MissingGreenlet).
+    async with _bootstrap_client(db) as client:
+        gesetzt = await client.post("/api/v1/learning/bootstrap/person", headers=bootstrap_kopf,
+                                    json={"user_id": person_b.id, "actor_id": learner_id(person_a, org.id)})
+    assert gesetzt.status_code == 200
+    konto = await db.get(User, person_a.id)
+
+    with pytest.raises(KennungVergeben):
+        await actor_von(db, konto)
+    assert await db.get(LearningPerson, person_a.id) is None
+
+
+@pytest.mark.asyncio
 async def test_bootstrap_person_setzt_zuordnung(db, person_a, bootstrap_kopf) -> None:
     async with _bootstrap_client(db) as client:
         r = await client.post("/api/v1/learning/bootstrap/person", headers=bootstrap_kopf,

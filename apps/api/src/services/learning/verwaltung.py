@@ -442,6 +442,138 @@ async def person_entfernen(
     _invalidate_session(user_id)
 
 
+@dataclass(frozen=True)
+class AnbieterRolle:
+    org_id: int
+    org_name: str
+    rolle: Rolle
+
+
+@dataclass(frozen=True)
+class LinkEintrag:
+    """An active link as the administration sees it; the token is never stored or shown."""
+
+    link_id: int
+    art: str
+    gruppe_id: int | None
+    gruppe: str | None
+    erstellt_am: datetime
+    laeuft_ab: datetime | None
+
+
+@dataclass(frozen=True)
+class PersonEintrag:
+    """A member of a provider, without e-mail address."""
+
+    user_id: int
+    anzeigename: str
+    rolle: Rolle
+    gruppen: list[str]
+
+
+async def ist_root(db: AsyncSession, user: Person) -> bool:
+    """``is_superadmin`` as stored in the database (never taken from a token or the browser)."""
+    return await _ist_root(db, user.id)
+
+
+async def rollen_der_person(db: AsyncSession, user: Person) -> list[AnbieterRolle]:
+    """The person's role per provider; Root gets every provider as Root."""
+    user_id = user.id
+    if await _ist_root(db, user_id):
+        anbieter = (await db.execute(select(Organization).order_by(Organization.id))).scalars().all()
+        return [AnbieterRolle(org_id=int(o.id), org_name=o.name, rolle=Rolle.ROOT) for o in anbieter]
+    rang: dict[int, Rolle] = {}
+    namen: dict[int, str] = {}
+    for org_id, org_name, role_id in (
+        await db.execute(
+            select(UserOrganization.org_id, Organization.name, UserOrganization.role_id)
+            .join(Organization, Organization.id == UserOrganization.org_id)
+            .where(UserOrganization.user_id == user_id)
+        )
+    ).all():
+        org_id = int(org_id)
+        rang[org_id] = min(rang.get(org_id, Rolle.TEILNEHMEND), _rang(role_id))
+        namen[org_id] = org_name
+    return [AnbieterRolle(org_id=o, org_name=namen[o], rolle=rang[o]) for o in sorted(rang)]
+
+
+async def aktive_links(
+    db: AsyncSession, akteur: Person, org_id: int, jetzt: datetime | None = None
+) -> list[LinkEintrag]:
+    """Links of the provider that still admit someone (admin links: shown to Root only)."""
+    akteur_id = akteur.id
+    jetzt = _utc(jetzt)
+    rolle = await _darf_verwalten(db, akteur_id, org_id)
+    zeilen = (
+        await db.execute(
+            select(LearningLink, UserGroup.name, LearningGruppe.offen)
+            .outerjoin(LearningGruppe, LearningGruppe.id == LearningLink.gruppe_id)
+            .outerjoin(UserGroup, UserGroup.id == LearningGruppe.usergroup_id)
+            .where(LearningLink.org_id == org_id, LearningLink.zurueckgezogen_am.is_(None))
+            .order_by(LearningLink.id)
+        )
+    ).all()
+    eintraege: list[LinkEintrag] = []
+    for link, gruppenname, offen in zeilen:
+        if link.laeuft_ab is not None and jetzt >= _utc(link.laeuft_ab):
+            continue
+        if link.art == "gruppe" and not offen:
+            continue
+        if link.art == "admin" and rolle is not Rolle.ROOT:
+            continue
+        eintraege.append(
+            LinkEintrag(
+                link_id=int(link.id), art=link.art, gruppe_id=link.gruppe_id, gruppe=gruppenname,
+                erstellt_am=_utc(link.erstellt_am),
+                laeuft_ab=_utc(link.laeuft_ab) if link.laeuft_ab is not None else None,
+            )
+        )
+    return eintraege
+
+
+def _anzeigename(user: User) -> str:
+    return f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username
+
+
+async def personen_des_anbieters(db: AsyncSession, akteur: Person, org_id: int) -> list[PersonEintrag]:
+    """Members of the provider with role and Teil-B groups; for Root, Admin, Kursleiter."""
+    akteur_id = akteur.id
+    await _darf_verwalten(db, akteur_id, org_id)
+    rang: dict[int, Rolle] = {}
+    konten: dict[int, User] = {}
+    for konto, role_id in (
+        await db.execute(
+            select(User, UserOrganization.role_id)
+            .join(UserOrganization, UserOrganization.user_id == User.id)
+            .where(UserOrganization.org_id == org_id)
+        )
+    ).all():
+        konten[int(konto.id)] = konto
+        rang[int(konto.id)] = min(rang.get(int(konto.id), Rolle.TEILNEHMEND), _rang(role_id))
+    root_ids = {i for i, konto in konten.items() if konto.is_superadmin}
+
+    gruppen: dict[int, list[str]] = {}
+    for user_id, gruppenname in (
+        await db.execute(
+            select(UserGroupUser.user_id, UserGroup.name)
+            .join(UserGroup, UserGroup.id == UserGroupUser.usergroup_id)
+            .join(LearningGruppe, LearningGruppe.usergroup_id == UserGroup.id)
+            .where(UserGroup.org_id == org_id)
+        )
+    ).all():
+        gruppen.setdefault(int(user_id), []).append(gruppenname)
+
+    return [
+        PersonEintrag(
+            user_id=i,
+            anzeigename=_anzeigename(konten[i]),
+            rolle=Rolle.ROOT if i in root_ids else rang[i],
+            gruppen=sorted(gruppen.get(i, [])),
+        )
+        for i in sorted(konten, key=lambda k: (_anzeigename(konten[k]).casefold(), k))
+    ]
+
+
 async def kurse_der_person(db: AsyncSession, user: Person) -> list[KursEintrag]:
     """Courses of all the person's providers: published, or assigned to one of her groups."""
     user_id = user.id

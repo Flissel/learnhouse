@@ -55,16 +55,18 @@ async def actor_von(db: AsyncSession, user: PublicUser | User) -> str:
 
     Commits the new row. Raises ``KennungVergeben`` when the formula id is already fixed
     for another account (two accounts never share a learner)."""
-    gespeichert = await db.get(LearningPerson, user.id)
+    # Read once: the rollback below expires an ORM ``User``, and an async lazy load fails.
+    user_id = user.id
+    gespeichert = await db.get(LearningPerson, user_id)
     if gespeichert is not None:
         return gespeichert.actor_id
     kennung = learner_id(user, await _org_of(db, user))
-    db.add(LearningPerson(user_id=user.id, actor_id=kennung))
+    db.add(LearningPerson(user_id=user_id, actor_id=kennung))
     try:
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        gespeichert = await db.get(LearningPerson, user.id)
+        gespeichert = await db.get(LearningPerson, user_id)
         if gespeichert is not None:  # a parallel first request of the same person won
             return gespeichert.actor_id
         raise KennungVergeben(kennung) from None

@@ -247,9 +247,12 @@ async def create_org(
     org_object: OrganizationCreate,
     current_user: PublicUser | AnonymousUser,
     db_session: AsyncSession,
+    *,
+    allow_multi_org: bool = False,
 ):
-    # EE gating: only allow multiple orgs with Enterprise Edition
-    if not is_multi_org_allowed():
+    # EE gating: only allow multiple orgs with Enterprise Edition. ``allow_multi_org`` is
+    # set only by the learning-mode provider route (bootstrap key and superadmin).
+    if not allow_multi_org and not is_multi_org_allowed():
         existing_org = (await db_session.execute(select(Organization).limit(1))).scalars().first()
         if existing_org is not None:
             raise HTTPException(

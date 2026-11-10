@@ -47,6 +47,9 @@ from src.services.learning.werkstatt_stand import (
     apply_werkstatt_stand,
 )
 from src.services.learning.kurs_kennung import _COURSE_PREFIX, _course_id, _stable_uuid
+from src.services.learning.personen import ist_sichere_kennung, person_zu_actor
+from src.services.learning.verwaltung import kurse_der_person
+from src.db.user_organizations import UserOrganization
 
 
 LOCAL_LEARNING_SERVICE_KEY_ENV = "LEARNHOUSE_LEARNING_SERVICE_KEY"
@@ -700,6 +703,41 @@ async def post_customer(
     for course in courses:
         await _authorize_course(request, db_session, owner, course, AccessAction.UPDATE)
     return await create_customer(request, db_session, owner, org_id, payload.name.strip(), courses)
+
+
+class PersonKursRead(BaseModel):
+    course_id: str
+    titel: str
+
+
+class PersonKurseRead(BaseModel):
+    kurse: list[PersonKursRead]
+
+
+@router.get(
+    "/personen/{actor_id}/kurse",
+    response_model=PersonKurseRead,
+    dependencies=[Depends(require_local_learning_service)],
+)
+async def get_person_kurse(
+    actor_id: str,
+    db_session: AsyncSession = Depends(get_db_session),
+) -> PersonKurseRead:
+    """The Hülle asks which courses this learner may open; 404 once she belongs to no provider."""
+    if not ist_sichere_kennung(actor_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    person = await person_zu_actor(db_session, actor_id)
+    if person is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    mitglied = (
+        await db_session.execute(
+            select(UserOrganization.id).where(UserOrganization.user_id == person.id).limit(1)
+        )
+    ).scalars().first()
+    if mitglied is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    kurse = await kurse_der_person(db_session, person)
+    return PersonKurseRead(kurse=[PersonKursRead(course_id=k.course_id, titel=k.titel) for k in kurse])
 
 
 @router.get(
