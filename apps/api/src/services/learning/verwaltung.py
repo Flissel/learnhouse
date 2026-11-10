@@ -102,6 +102,7 @@ class KursEintrag:
     course_uuid: str
     titel: str
     gruppen: list[str]
+    org_id: int
 
 
 Person = PublicUser | User
@@ -617,6 +618,7 @@ async def kurse_der_person(db: AsyncSession, user: Person) -> list[KursEintrag]:
                 course_uuid=kurs.course_uuid,
                 titel=kurs.name,
                 gruppen=sorted(gruppen.get(int(kurs.id), [])),
+                org_id=int(kurs.org_id),
             )
         )
     return eintraege

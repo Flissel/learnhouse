@@ -153,6 +153,22 @@ export function KursuebersichtAnsicht({ orgslug, bereich, zustand, oeffnen, onOe
   )
 }
 
+/**
+ * After a successful hand-over the page stays as it was; coming back with the back button
+ * restores it from the bfcache with every card still "busy". `pageshow` with `persisted`
+ * marks exactly that return, so the cards are released there. Returns the unsubscribe.
+ */
+export function beiRueckkehr(
+  fenster: Pick<Window, 'addEventListener' | 'removeEventListener'>,
+  zuruecksetzen: () => void,
+): () => void {
+  const handler = (event: PageTransitionEvent) => {
+    if (event.persisted) zuruecksetzen()
+  }
+  fenster.addEventListener('pageshow', handler)
+  return () => fenster.removeEventListener('pageshow', handler)
+}
+
 /** Entry of the learning area: the person's courses, and management for those allowed. */
 export default function Kursuebersicht({ orgslug, bereich }: { orgslug: string; bereich: KursuebersichtBereich }) {
   const session = useLHSession()
@@ -171,6 +187,8 @@ export default function Kursuebersicht({ orgslug, bereich }: { orgslug: string; 
     // Only a sign-in change reloads; a refreshed access token is the same person.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, Boolean(accessToken)])
+
+  useEffect(() => beiRueckkehr(window, () => setOeffnen({})), [])
 
   function oeffneKurs(courseId: string) {
     setOeffnen((alt) => ({ ...alt, [courseId]: { beschaeftigt: true } }))

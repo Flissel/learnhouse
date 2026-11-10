@@ -352,7 +352,8 @@ async def test_kurse_der_person(db, org, org2, leute, kurs_a, kurs_intern, kurs_
         (_course_id(kurs_intern), kurs_intern.course_uuid, "Kurs Intern", ["Montag"]),
     ]
     # Another provider's courses are never listed; without a group, unpublished stays hidden.
-    assert [k.titel for k in await kurse_der_person(db, leute["leiter_b"])] == ["Kurs B"]
+    assert [k.org_id for k in kurse] == [org.id, org.id]
+    assert [(k.titel, k.org_id) for k in await kurse_der_person(db, leute["leiter_b"])] == [("Kurs B", org2.id)]
     assert [k.titel for k in await kurse_der_person(db, leiter_a)] == ["Kurs A"]
     assert await kurse_der_person(db, leute["neu"]) == []
 

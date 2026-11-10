@@ -27,6 +27,8 @@ export interface Kurs {
   course_uuid: string
   titel: string
   gruppen: string[]
+  /** The provider the course belongs to (groups are created per provider). */
+  org_id: number
 }
 
 export interface AnbieterRolle {
@@ -180,7 +182,7 @@ function istZahl(value: unknown): value is number {
 
 function istKurs(value: unknown): value is Kurs {
   return isRecord(value) && istString(value.course_id) && istString(value.course_uuid)
-    && istString(value.titel) && istStringListe(value.gruppen)
+    && istString(value.titel) && istStringListe(value.gruppen) && istZahl(value.org_id)
 }
 
 function istAnbieterRolle(value: unknown): value is AnbieterRolle {

@@ -166,11 +166,29 @@ async def test_kursuebersicht_zeigt_kurse_und_rollen(db, org, leute, kurs_a, kur
     assert uebersicht.status_code == 200
     assert uebersicht.json() == {
         "kurse": [{"course_id": _course_id(kurs_a), "course_uuid": kurs_a.course_uuid, "titel": "Kurs A",
-                   "gruppen": []}],
+                   "gruppen": [], "org_id": org.id}],
         "rollen": [{"org_id": org.id, "org_name": "Test Org", "rolle": "teilnehmend"}],
     }
     # Root sees every provider as root.
     assert {(r["org_id"], r["rolle"]) for r in root.json()["rollen"]} == {(1, "root"), (2, "root")}
+
+
+async def test_kursuebersicht_nennt_anbieter_je_kurs(db, org, org2, leute, kurs_a, kurs_b, lernmodus) -> None:
+    """With two providers every course says whose it is (the web offers groups per provider)."""
+    person_a = leute["person_a"]
+    now = str(datetime.now())
+    db.add(UserOrganization(user_id=person_a.id, org_id=org2.id, role_id=4, creation_date=now, update_date=now))
+    await db.commit()
+    wer = _Wer()
+    wer.user = person_a
+    async with _client(db, wer) as client:
+        uebersicht = await client.get("/api/v1/learning/verwaltung/kursuebersicht")
+
+    assert uebersicht.status_code == 200
+    assert {(k["titel"], k["org_id"]) for k in uebersicht.json()["kurse"]} == {
+        ("Kurs A", org.id), ("Kurs B", org2.id),
+    }
+    assert org.id != org2.id
 
 
 async def test_uebergabe_nur_eigene_kurse(db, org, leute, kurs_a, kurs_intern, kurs_b, lernmodus, monkeypatch) -> None:

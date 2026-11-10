@@ -109,6 +109,7 @@ class KursRead(BaseModel):
     course_uuid: str
     titel: str
     gruppen: list[str]
+    org_id: int
 
 
 class AnbieterRolleRead(BaseModel):
@@ -130,7 +131,8 @@ async def get_kursuebersicht(
     kurse = await dienst.kurse_der_person(db_session, user)
     rollen = await dienst.rollen_der_person(db_session, user)
     return KursuebersichtRead(
-        kurse=[KursRead(course_id=k.course_id, course_uuid=k.course_uuid, titel=k.titel, gruppen=k.gruppen)
+        kurse=[KursRead(course_id=k.course_id, course_uuid=k.course_uuid, titel=k.titel, gruppen=k.gruppen,
+                        org_id=k.org_id)
                for k in kurse],
         rollen=[AnbieterRolleRead(org_id=r.org_id, org_name=r.org_name, rolle=_ROLLEN_NAME[r.rolle])
                 for r in rollen],

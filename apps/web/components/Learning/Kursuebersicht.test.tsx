@@ -4,11 +4,11 @@ import { isValidElement, type ReactElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { aufDerFlaecheLernen, darfVerwalten, GRUPPE_SPAETER, type AnbieterRolle, type Kurs } from '@/services/learning/verwaltung'
-import { KursKarte, KursuebersichtAnsicht } from './Kursuebersicht'
+import { beiRueckkehr, KursKarte, KursuebersichtAnsicht } from './Kursuebersicht'
 import SpaceRail from './SpaceRail'
 
-const kursAllein: Kurs = { course_id: 'kurs-a', course_uuid: 'course_kurs-a', titel: 'Bruchrechnen', gruppen: [] }
-const kursInGruppe: Kurs = { course_id: 'kurs-b', course_uuid: 'course_kurs-b', titel: 'Geometrie', gruppen: ['Gruppe Nord'] }
+const kursAllein: Kurs = { course_id: 'kurs-a', course_uuid: 'course_kurs-a', titel: 'Bruchrechnen', gruppen: [], org_id: 1 }
+const kursInGruppe: Kurs = { course_id: 'kurs-b', course_uuid: 'course_kurs-b', titel: 'Geometrie', gruppen: ['Gruppe Nord'], org_id: 1 }
 
 const teilnehmend: AnbieterRolle[] = [{ org_id: 1, org_name: 'Anbieter A', rolle: 'teilnehmend' }]
 const admin: AnbieterRolle[] = [{ org_id: 1, org_name: 'Anbieter A', rolle: 'admin' }]
@@ -82,6 +82,24 @@ describe('Kursübersicht', () => {
 
     await expect(aufDerFlaecheLernen('kurs-x', 'zugang', (url) => ziele.push(url))).rejects.toThrow('Nicht erlaubt.')
     expect(ziele).toEqual([])
+  })
+
+  test('Rückkehr per Zurück-Taste (bfcache) gibt gesperrte Knöpfe wieder frei', () => {
+    const fenster = new EventTarget()
+    let zurueckgesetzt = 0
+    const abmelden = beiRueckkehr(
+      fenster as unknown as Pick<Window, 'addEventListener' | 'removeEventListener'>,
+      () => { zurueckgesetzt += 1 },
+    )
+
+    fenster.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: false }))
+    expect(zurueckgesetzt).toBe(0)
+    fenster.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }))
+    expect(zurueckgesetzt).toBe(1)
+
+    abmelden()
+    fenster.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }))
+    expect(zurueckgesetzt).toBe(1)
   })
 
   test('steht der Kurs in einer Gruppe, zeigt die Karte den Hinweis auf die spätere Gruppenfläche', () => {

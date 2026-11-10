@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Check, Copy } from 'lucide-react'
 import {
   aktiveLinks,
+  darfVerwalten,
   gruppeAnlegen,
   gruppeSchliessen,
   kursleiterLinkErzeugen,
@@ -137,7 +138,13 @@ function linkBeschreibung(link: AktiverLink): string {
 }
 
 /** Management for admins, course leaders and root: groups, course-leader links, people. */
-export default function Verwaltung({ kurse, rollen, accessToken }: VerwaltungProps) {
+export default function Verwaltung(props: VerwaltungProps) {
+  // The component carries the role lock itself: participants get nothing, whoever renders it.
+  if (!darfVerwalten(props.rollen)) return null
+  return <VerwaltungInhalt {...props} />
+}
+
+function VerwaltungInhalt({ kurse, rollen, accessToken }: VerwaltungProps) {
   const anbieter = verwaltbareAnbieter(rollen)
   const [orgId, setOrgId] = useState<number | null>(anbieter[0]?.org_id ?? null)
 
@@ -145,7 +152,12 @@ export default function Verwaltung({ kurse, rollen, accessToken }: VerwaltungPro
   const [links, setLinks] = useState<AktiverLink[] | null>(null)
   const [ladeFehler, setLadeFehler] = useState<string | null>(null)
 
-  const [kursUuid, setKursUuid] = useState(kurse[0]?.course_uuid ?? '')
+  // A group belongs to one provider: only that provider's courses are offered.
+  const kurseDesAnbieters = kurse.filter((kurs) => kurs.org_id === orgId)
+  const [kursWahl, setKursUuid] = useState('')
+  const kursUuid = kurseDesAnbieters.some((kurs) => kurs.course_uuid === kursWahl)
+    ? kursWahl
+    : kurseDesAnbieters[0]?.course_uuid ?? ''
   const [gruppenName, setGruppenName] = useState('')
   const [neueGruppe, setNeueGruppe] = useState<{ gruppe_id: number; url: string } | null>(null)
   const [gruppeFehler, setGruppeFehler] = useState<string | null>(null)
@@ -306,7 +318,7 @@ export default function Verwaltung({ kurse, rollen, accessToken }: VerwaltungPro
           <label className="flex flex-col text-sm font-semibold text-zinc-700">
             Kurs
             <select className={`${fieldClass} mt-1`} onChange={(event) => setKursUuid(event.target.value)} value={kursUuid}>
-              {kurse.map((kurs) => (
+              {kurseDesAnbieters.map((kurs) => (
                 <option key={kurs.course_uuid} value={kurs.course_uuid}>{kurs.titel}</option>
               ))}
             </select>

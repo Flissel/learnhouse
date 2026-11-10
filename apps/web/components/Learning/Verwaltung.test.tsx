@@ -5,14 +5,18 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import {
   gruppeAnlegen,
   kursleiterLinkErzeugen,
+  kursuebersichtLaden,
   personEntfernen,
   type AnbieterRolle,
   type Kurs,
 } from '@/services/learning/verwaltung'
 import Verwaltung, { LinkAnzeige, PersonenListe } from './Verwaltung'
 
-const kurse: Kurs[] = [{ course_id: 'kurs-a', course_uuid: 'course_kurs-a', titel: 'Bruchrechnen', gruppen: [] }]
+const kurse: Kurs[] = [{ course_id: 'kurs-a', course_uuid: 'course_kurs-a', titel: 'Bruchrechnen', gruppen: [], org_id: 1 }]
 const rollen: AnbieterRolle[] = [{ org_id: 1, org_name: 'Anbieter A', rolle: 'kursleiter' }]
+const kursAndererAnbieter: Kurs = {
+  course_id: 'kurs-b', course_uuid: 'course_kurs-b', titel: 'Geometrie', gruppen: [], org_id: 2,
+}
 
 type Aufruf = { url: string; init?: RequestInit }
 
@@ -39,6 +43,44 @@ describe('Verwaltung', () => {
     expect(html).toContain('Kursleiter-Link erzeugen')
     expect(html).toContain('Personen')
     expect(html).toContain('Bruchrechnen')
+  })
+
+  test('Gruppe anlegen bietet nur Kurse des gewählten Anbieters an', () => {
+    const html = renderToStaticMarkup(<Verwaltung kurse={[...kurse, kursAndererAnbieter]} rollen={rollen} />)
+
+    expect(html).toContain('value="course_kurs-a"')
+    expect(html).not.toContain('Geometrie')
+    expect(html).not.toContain('course_kurs-b')
+
+    // Root with two providers starts on the first one: only its courses.
+    const root = renderToStaticMarkup(
+      <Verwaltung
+        kurse={[kursAndererAnbieter, ...kurse]}
+        rollen={[
+          { org_id: 2, org_name: 'Anbieter B', rolle: 'root' },
+          { org_id: 1, org_name: 'Anbieter A', rolle: 'root' },
+        ]}
+      />,
+    )
+    expect(root).toContain('value="course_kurs-b"')
+    expect(root).not.toContain('value="course_kurs-a"')
+  })
+
+  test('mit Teilnehmerrolle rendert die Verwaltung nichts', () => {
+    const html = renderToStaticMarkup(
+      <Verwaltung kurse={kurse} rollen={[{ org_id: 1, org_name: 'Anbieter A', rolle: 'teilnehmend' }]} />,
+    )
+
+    expect(html).toBe('')
+  })
+
+  test('die Kursübersicht liest den Anbieter je Kurs und weist Antworten ohne ihn ab', async () => {
+    antwortet(200, { kurse: [{ ...kurse[0] }], rollen })
+    expect((await kursuebersichtLaden('zugang')).kurse[0].org_id).toBe(1)
+
+    const { org_id: _ohne, ...ohneAnbieter } = kurse[0]
+    antwortet(200, { kurse: [ohneAnbieter], rollen })
+    await expect(kursuebersichtLaden('zugang')).rejects.toThrow()
   })
 
   test('ein neuer Link wird angezeigt und lässt sich kopieren', () => {
