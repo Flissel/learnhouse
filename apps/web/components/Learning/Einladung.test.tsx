@@ -6,6 +6,7 @@ import {
   einladungAnnehmen,
   einladungLesen,
   kontoAnlegen,
+  kontoAnlegenUndAnmelden,
   zielNachEinloesung,
 } from '@/services/learning/verwaltung'
 import { EinladungAnsicht, type EinladungAnsichtProps } from './Einladung'
@@ -99,6 +100,34 @@ describe('Einladungsseite', () => {
 
     antwortet(410, { detail: 'Dieser Einladungslink ist abgelaufen.', grund: 'abgelaufen' })
     await expect(kontoAnlegen('tok', konto)).rejects.toThrow('Dieser Einladungslink ist abgelaufen.')
+  })
+
+  test('neues Konto meldet danach über die Anmeldung des Webs an (die API setzt ihre Cookies außerhalb von https mit Secure)', async () => {
+    const konto = { email: 'person-a@example.org', username: 'person-a', password: 'geheim-genug' }
+    const einloesung = {
+      org_id: 1, rolle: 'teilnehmend', gruppe_id: 3, course_id: 'kurs-a',
+      uebergabe_url: 'https://huelle.example/lernen/uebergabe/x',
+    }
+    const anmeldungen: unknown[][] = []
+    const anmelden = async (...args: unknown[]) => { anmeldungen.push(args); return { ok: true } }
+
+    const urls = antwortet(200, einloesung)
+    expect(await kontoAnlegenUndAnmelden('tok', konto, anmelden)).toEqual(einloesung)
+    expect(urls[0].endsWith('learning/einladung/tok/konto')).toBe(true)
+    expect(anmeldungen).toEqual([
+      ['credentials', { redirect: false, email: 'person-a@example.org', password: 'geheim-genug' }],
+    ])
+
+    // Scheitert die Anmeldung, steht das Konto trotzdem: weiter wie bisher, die Anmeldeseite bleibt.
+    antwortet(200, einloesung)
+    const scheitert = async () => { throw new Error('netz') }
+    expect(await kontoAnlegenUndAnmelden('tok', konto, scheitert)).toEqual(einloesung)
+
+    // Lehnt die API ab, wird gar nicht erst angemeldet.
+    anmeldungen.length = 0
+    antwortet(410, { detail: 'Dieser Einladungslink ist abgelaufen.', grund: 'abgelaufen' })
+    await expect(kontoAnlegenUndAnmelden('tok', konto, anmelden)).rejects.toThrow('Dieser Einladungslink ist abgelaufen.')
+    expect(anmeldungen).toEqual([])
   })
 
   test('andere Fehler zeigen einen deutschen Allgemeintext, keine Rohdaten', async () => {

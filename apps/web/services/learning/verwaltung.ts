@@ -335,3 +335,29 @@ export async function einladungAnnehmen(linkToken: string, accessToken?: string)
 export async function kontoAnlegen(linkToken: string, konto: KontoDaten): Promise<Einloesung> {
   return alsEinloesung(await anfrage(`${einladungPfad(linkToken)}/konto`, 'POST', undefined, konto))
 }
+
+/** The sign-in of the web (`useAuth().signIn`), passed in so this module stays free of React. */
+export type Anmelden = (
+  provider: 'credentials',
+  optionen: { redirect: false; email: string; password: string },
+) => Promise<unknown>
+
+/**
+ * A new account through the link, then signed in through the web's own login route.
+ * The API sets its cookies `Secure` outside https, so on a plain-http host (tailnet) only
+ * the same-origin `/api/auth/login` session reaches the browser. If that sign-in fails,
+ * the account and the redemption still stand; the login page remains the way in.
+ */
+export async function kontoAnlegenUndAnmelden(
+  linkToken: string,
+  konto: KontoDaten,
+  anmelden: Anmelden,
+): Promise<Einloesung> {
+  const einloesung = await kontoAnlegen(linkToken, konto)
+  try {
+    await anmelden('credentials', { redirect: false, email: konto.email, password: konto.password })
+  } catch {
+    // The account exists; the person signs in on the login page instead.
+  }
+  return einloesung
+}

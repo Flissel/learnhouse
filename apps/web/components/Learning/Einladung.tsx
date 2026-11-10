@@ -2,11 +2,12 @@
 
 import { useEffect, useState, type FormEvent } from 'react'
 import { LogIn, Mail } from 'lucide-react'
+import { useAuth } from '@components/Contexts/AuthContext'
 import { useLHSession } from '@components/Contexts/LHSessionContext'
 import {
   einladungAnnehmen,
   einladungLesen,
-  kontoAnlegen,
+  kontoAnlegenUndAnmelden,
   LernFehler,
   meldungAus,
   zielNachEinloesung,
@@ -116,6 +117,7 @@ export function EinladungAnsicht({
 /** /einladung/[token]: redeem an invitation, signed in or with a new account. */
 export default function Einladung({ token }: { token: string }) {
   const session = useLHSession()
+  const { signIn } = useAuth()
   const status = session?.status ?? 'loading'
   const accessToken = session?.data?.tokens?.access_token
   const [zustand, setZustand] = useState<EinladungAnsichtProps['zustand']>({ art: 'laden' })
@@ -147,7 +149,7 @@ export default function Einladung({ token }: { token: string }) {
       loginHref={`/login?next=${encodeURIComponent(`/einladung/${encodeURIComponent(token)}`)}`}
       meldung={meldung}
       onAnnehmen={() => { void einloesen(() => einladungAnnehmen(token, accessToken)) }}
-      onKontoAnlegen={(konto) => { void einloesen(() => kontoAnlegen(token, konto)) }}
+      onKontoAnlegen={(konto) => { void einloesen(() => kontoAnlegenUndAnmelden(token, konto, signIn)) }}
       zustand={zustand}
     />
   )
