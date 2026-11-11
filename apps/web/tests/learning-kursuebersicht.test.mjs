@@ -32,9 +32,8 @@ describe("Lernfläche Teil B: Kursübersicht, Einladung, Verwaltung im Web", () 
   test("übernimmt die festgelegten Texte wörtlich", () => {
     const source = readFileSync(service, "utf8");
 
-    expect(source).toContain(
-      "Die gemeinsame Gruppenfläche kommt in einem späteren Schritt. Bis dahin arbeiten Sie den Kurs auf Ihrer eigenen Fläche durch.",
-    );
+    expect(source).not.toContain("kommt in einem späteren Schritt");
+    expect(source).toContain("Gruppenfläche öffnen");
     expect(source).toContain("Auf der Fläche lernen");
     expect(source).toContain("learning/${pfad}");
     expect(source).toContain("anfrage('uebergabe', 'POST'");

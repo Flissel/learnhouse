@@ -9,8 +9,7 @@ import { RequestBodyWithAuthHeader, secureFetch } from '@services/utils/ts/reque
  * and copied, never stored or logged here.
  */
 
-export const GRUPPE_SPAETER =
-  'Die gemeinsame Gruppenfläche kommt in einem späteren Schritt. Bis dahin arbeiten Sie den Kurs auf Ihrer eigenen Fläche durch.'
+export const KNOPF_GRUPPENFLAECHE = 'Gruppenfläche öffnen'
 export const KNOPF_FLAECHE = 'Auf der Fläche lernen'
 export const UEBERSICHT_WEG = 'Die Kursübersicht ist gerade nicht erreichbar. Bitte versuchen Sie es gleich noch einmal.'
 export const ALLGEMEINER_FEHLER = 'Das hat gerade nicht geklappt. Bitte versuchen Sie es noch einmal.'
@@ -22,11 +21,16 @@ export const KURSUEBERSICHT_PFAD = '/learning'
 
 export type Rolle = 'root' | 'admin' | 'kursleiter' | 'teilnehmend'
 
+export interface KursGruppe {
+  id: number
+  name: string
+}
+
 export interface Kurs {
   course_id: string
   course_uuid: string
   titel: string
-  gruppen: string[]
+  gruppen: KursGruppe[]
   /** The provider the course belongs to (groups are created per provider). */
   org_id: number
 }
@@ -180,9 +184,13 @@ function istZahl(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
+function istKursGruppe(value: unknown): value is KursGruppe {
+  return isRecord(value) && istZahl(value.id) && istString(value.name)
+}
+
 function istKurs(value: unknown): value is Kurs {
   return isRecord(value) && istString(value.course_id) && istString(value.course_uuid)
-    && istString(value.titel) && istStringListe(value.gruppen) && istZahl(value.org_id)
+    && istString(value.titel) && Array.isArray(value.gruppen) && value.gruppen.every(istKursGruppe) && istZahl(value.org_id)
 }
 
 function istAnbieterRolle(value: unknown): value is AnbieterRolle {
@@ -252,13 +260,18 @@ export async function kursuebersichtLaden(accessToken?: string): Promise<Kursueb
   }
 }
 
-/** Opens the course on the person's own Lern-Hülle: hand-over link, then navigate there. */
+/**
+ * Opens the course on the person's own Lern-Hülle: hand-over link, then navigate there.
+ * With `gruppeId` the link leads to the shared group surface (the server checks membership).
+ */
 export async function aufDerFlaecheLernen(
   courseId: string,
   accessToken: string | undefined,
   navigieren: (url: string) => void = (url) => window.location.assign(url),
+  gruppeId?: number,
 ): Promise<void> {
-  const data = await anfrage('uebergabe', 'POST', accessToken, { course_id: courseId })
+  const body = gruppeId === undefined ? { course_id: courseId } : { course_id: courseId, gruppe_id: gruppeId }
+  const data = await anfrage('uebergabe', 'POST', accessToken, body)
   navigieren(erwarte(data, istUrlAntwort).url)
 }
 

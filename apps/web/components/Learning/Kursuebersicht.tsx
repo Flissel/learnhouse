@@ -7,8 +7,8 @@ import { getUriWithOrg } from '@services/config/config'
 import {
   aufDerFlaecheLernen,
   darfVerwalten,
-  GRUPPE_SPAETER,
   KNOPF_FLAECHE,
+  KNOPF_GRUPPENFLAECHE,
   kursuebersichtLaden,
   meldungAus,
   UEBERSICHT_WEG,
@@ -34,12 +34,14 @@ export interface KartenZustand {
 
 const primaryButton =
   'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#0E6B5C] px-5 font-semibold text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0E6B5C]/40 disabled:opacity-50'
+const secondaryButton =
+  'inline-flex min-h-11 items-center justify-center rounded-xl border border-[#0E6B5C] px-4 text-sm font-semibold text-[#0E6B5C] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0E6B5C]/40 disabled:opacity-50'
 const textLink = 'inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-[#0E6B5C] hover:underline'
 
 /** One course: title, groups and the one-click hand-over to the own Lern-Hülle. */
 export function KursKarte({ kurs, onOeffnen, zustand }: {
   kurs: Kurs
-  onOeffnen: (courseId: string) => void
+  onOeffnen: (courseId: string, gruppeId?: number) => void
   zustand?: KartenZustand
 }) {
   return (
@@ -49,13 +51,24 @@ export function KursKarte({ kurs, onOeffnen, zustand }: {
         <h2 className="min-w-0 break-words text-lg font-bold leading-snug">{kurs.titel}</h2>
       </div>
       {kurs.gruppen.length ? (
-        <div className="flex flex-col gap-2">
-          <p className="flex items-center gap-2 text-sm text-zinc-700">
-            <Users aria-hidden="true" size={16} />
-            <span className="break-words">{kurs.gruppen.join(', ')}</span>
-          </p>
-          <p className="rounded-xl bg-[#E8F2EF] px-3 py-2 text-sm text-[#0E6B5C]">{GRUPPE_SPAETER}</p>
-        </div>
+        <ul className="flex flex-col gap-2">
+          {kurs.gruppen.map((gruppe) => (
+            <li className="flex flex-wrap items-center justify-between gap-2" key={gruppe.id}>
+              <p className="flex min-w-0 items-center gap-2 text-sm text-zinc-700">
+                <Users aria-hidden="true" className="shrink-0" size={16} />
+                <span className="break-words">Gruppe: {gruppe.name}</span>
+              </p>
+              <button
+                className={secondaryButton}
+                disabled={zustand?.beschaeftigt === true}
+                onClick={() => onOeffnen(kurs.course_id, gruppe.id)}
+                type="button"
+              >
+                {KNOPF_GRUPPENFLAECHE}
+              </button>
+            </li>
+          ))}
+        </ul>
       ) : null}
       <div className="mt-auto">
         <button
@@ -82,7 +95,7 @@ export interface KursuebersichtAnsichtProps {
   bereich: KursuebersichtBereich
   zustand: UebersichtZustand
   oeffnen: Record<string, KartenZustand>
-  onOeffnen: (courseId: string) => void
+  onOeffnen: (courseId: string, gruppeId?: number) => void
   accessToken?: string
 }
 
@@ -190,9 +203,9 @@ export default function Kursuebersicht({ orgslug, bereich }: { orgslug: string; 
 
   useEffect(() => beiRueckkehr(window, () => setOeffnen({})), [])
 
-  function oeffneKurs(courseId: string) {
+  function oeffneKurs(courseId: string, gruppeId?: number) {
     setOeffnen((alt) => ({ ...alt, [courseId]: { beschaeftigt: true } }))
-    aufDerFlaecheLernen(courseId, accessToken).catch((fehler: unknown) => {
+    aufDerFlaecheLernen(courseId, accessToken, undefined, gruppeId).catch((fehler: unknown) => {
       setOeffnen((alt) => ({ ...alt, [courseId]: { fehler: meldungAus(fehler) } }))
     })
   }
