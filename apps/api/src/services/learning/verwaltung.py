@@ -642,17 +642,18 @@ async def kurse_der_person(db: AsyncSession, user: Person) -> list[KursEintrag]:
 async def gruppe_person(db: AsyncSession, gruppe_id: int, user: Person) -> GruppePerson | None:
     """Is ``user`` a member of the group? ``None`` for an unknown group.
 
-    Member means a ``usergroup_user`` row, whether or not the group is still open."""
+    Member means a ``usergroup_user`` row plus a ``userorganization`` row in the group's provider,
+    whether or not the group is still open."""
     zeile = (
         await db.execute(
-            select(LearningGruppe, UserGroup.name)
+            select(LearningGruppe, UserGroup.name, UserGroup.org_id)
             .join(UserGroup, UserGroup.id == LearningGruppe.usergroup_id)
             .where(LearningGruppe.id == gruppe_id)
         )
     ).first()
     if zeile is None:
         return None
-    gruppe, gruppenname = zeile
+    gruppe, gruppenname, org_id = zeile
     kurs = await db.get(Course, gruppe.course_id)
     if kurs is None:
         return None
@@ -667,8 +668,16 @@ async def gruppe_person(db: AsyncSession, gruppe_id: int, user: Person) -> Grupp
             .limit(1)
         )
     ).scalars().first()
+    # LearnHouse's own removal drops only the userorganization row: belonging to the provider counts too.
+    im_anbieter = (
+        await db.execute(
+            select(UserOrganization.id)
+            .where(UserOrganization.user_id == user.id, UserOrganization.org_id == org_id)
+            .limit(1)
+        )
+    ).scalars().first()
     konto = await db.get(User, user.id)
     return GruppePerson(
-        mitglied=eintrag is not None, offen=bool(gruppe.offen), course_id=course_id,
+        mitglied=eintrag is not None and im_anbieter is not None, offen=bool(gruppe.offen), course_id=course_id,
         gruppe_name=gruppenname, anzeigename=_anzeigename(konto) if konto is not None else None,
     )

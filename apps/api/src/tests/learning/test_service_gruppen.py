@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import delete
 
+from src.db.user_organizations import UserOrganization
 from src.services.learning.kurs_kennung import _course_id
 from src.services.learning.personen import actor_von
-from src.services.learning.verwaltung import gruppe_anlegen, gruppe_schliessen, link_einloesen
+from src.services.learning.verwaltung import gruppe_anlegen, gruppe_schliessen, link_einloesen, person_entfernen
 from src.tests.learning.test_bootstrap import SERVICE_HEADER, SERVICE_KEY
 from src.tests.learning.test_verwaltung import (  # noqa: F401  (fixtures)
     kurs_a,
@@ -73,3 +75,32 @@ async def test_gruppe_person_ohne_schluessel_403(db, org, leute, kurs_intern, le
                                   headers={SERVICE_HEADER: "x" * 40})
 
     assert ohne.status_code == falsch.status_code == 403
+
+
+async def test_entfernte_person_ist_kein_mitglied(db, org, leute, kurs_intern, lernmodus) -> None:
+    gruppe, token = await gruppe_anlegen(db, leute["leiter_a"], org.id, kurs_intern.course_uuid, "Montag")
+    await link_einloesen(db, token, leute["person_a"])
+    actor = await actor_von(db, leute["person_a"])
+    wer = _Wer()
+    async with _client(db, wer) as client:
+        await person_entfernen(db, leute["leiter_a"], org.id, leute["person_a"].id)
+        antwort = await client.get(f"/api/v1/learning/gruppen/{gruppe.id}/personen/{actor}", headers=KEY)
+        wer.user = leute["person_a"]
+        uebergabe = await client.post("/api/v1/learning/uebergabe",
+                                      json={"course_id": _course_id(kurs_intern), "gruppe_id": gruppe.id})
+
+    assert antwort.status_code == 200 and antwort.json()["mitglied"] is False
+    assert uebergabe.status_code == 403
+
+
+async def test_native_entfernung_nur_anbieterzeile_ist_kein_mitglied(db, org, leute, kurs_intern, lernmodus) -> None:
+    """LearnHouse's own removal deletes the userorganization row but leaves usergroup_user behind."""
+    gruppe, token = await gruppe_anlegen(db, leute["leiter_a"], org.id, kurs_intern.course_uuid, "Montag")
+    await link_einloesen(db, token, leute["person_a"])
+    actor = await actor_von(db, leute["person_a"])
+    await db.execute(delete(UserOrganization).where(UserOrganization.user_id == leute["person_a"].id))
+    await db.commit()
+    async with _client(db, _Wer()) as client:
+        antwort = await client.get(f"/api/v1/learning/gruppen/{gruppe.id}/personen/{actor}", headers=KEY)
+
+    assert antwort.status_code == 200 and antwort.json()["mitglied"] is False
