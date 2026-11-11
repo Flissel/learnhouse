@@ -48,7 +48,7 @@ from src.services.learning.werkstatt_stand import (
 )
 from src.services.learning.kurs_kennung import _COURSE_PREFIX, _course_id, _stable_uuid
 from src.services.learning.personen import ist_sichere_kennung, person_zu_actor
-from src.services.learning.verwaltung import kurse_der_person
+from src.services.learning.verwaltung import gruppe_person, kurse_der_person
 from src.db.user_organizations import UserOrganization
 
 
@@ -738,6 +738,39 @@ async def get_person_kurse(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     kurse = await kurse_der_person(db_session, person)
     return PersonKurseRead(kurse=[PersonKursRead(course_id=k.course_id, titel=k.titel) for k in kurse])
+
+
+class GruppePersonRead(BaseModel):
+    mitglied: bool
+    offen: bool
+    course_id: str
+    gruppe_name: str
+    anzeigename: str | None
+
+
+@router.get(
+    "/gruppen/{gruppe_id}/personen/{actor_id}",
+    response_model=GruppePersonRead,
+    dependencies=[Depends(require_local_learning_service)],
+)
+async def get_gruppe_person(
+    gruppe_id: int,
+    actor_id: str,
+    db_session: AsyncSession = Depends(get_db_session),
+) -> GruppePersonRead:
+    """The Hülle checks every 60 s whether this person still belongs to the group surface."""
+    if not ist_sichere_kennung(actor_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    person = await person_zu_actor(db_session, actor_id)
+    if person is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    gruppe = await gruppe_person(db_session, gruppe_id, person)
+    if gruppe is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return GruppePersonRead(
+        mitglied=gruppe.mitglied, offen=gruppe.offen, course_id=gruppe.course_id,
+        gruppe_name=gruppe.gruppe_name, anzeigename=gruppe.anzeigename,
+    )
 
 
 @router.get(

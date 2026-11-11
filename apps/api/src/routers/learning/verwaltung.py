@@ -81,8 +81,9 @@ def _einladung_url(basis: str, token: str) -> str:
     return f"{basis}/einladung/{token}"
 
 
-def _uebergabe_url(basis: str, actor_id: str, course_id: str) -> str:
-    return f"{basis}/lernen/uebergabe/{uebergabe_token(actor_id, course_id)}"
+def _uebergabe_url(basis: str, actor_id: str, course_id: str, gruppe_id: int | None = None) -> str:
+    url = f"{basis}/lernen/uebergabe/{uebergabe_token(actor_id, course_id)}"
+    return url if gruppe_id is None else f"{url}?gruppe={gruppe_id}"
 
 
 def _verweigert(fehler: dienst.Verweigert) -> HTTPException:
@@ -104,11 +105,16 @@ def _kennung_vergeben() -> HTTPException:
 # --- Course overview and hand-over -----------------------------------------------------
 
 
+class GruppeKurzRead(BaseModel):
+    id: int
+    name: str
+
+
 class KursRead(BaseModel):
     course_id: str
     course_uuid: str
     titel: str
-    gruppen: list[str]
+    gruppen: list[GruppeKurzRead]
     org_id: int
 
 
@@ -131,7 +137,8 @@ async def get_kursuebersicht(
     kurse = await dienst.kurse_der_person(db_session, user)
     rollen = await dienst.rollen_der_person(db_session, user)
     return KursuebersichtRead(
-        kurse=[KursRead(course_id=k.course_id, course_uuid=k.course_uuid, titel=k.titel, gruppen=k.gruppen,
+        kurse=[KursRead(course_id=k.course_id, course_uuid=k.course_uuid, titel=k.titel,
+                        gruppen=[GruppeKurzRead(id=g.id, name=g.name) for g in k.gruppen],
                         org_id=k.org_id)
                for k in kurse],
         rollen=[AnbieterRolleRead(org_id=r.org_id, org_name=r.org_name, rolle=_ROLLEN_NAME[r.rolle])
@@ -141,6 +148,7 @@ async def get_kursuebersicht(
 
 class UebergabeWrite(_Strict):
     course_id: str = Field(min_length=1, max_length=80)
+    gruppe_id: int | None = Field(default=None, gt=0)
 
 
 class UrlRead(BaseModel):
@@ -158,11 +166,16 @@ async def post_uebergabe(
     kurse = await dienst.kurse_der_person(db_session, user)
     if payload.course_id not in {k.course_id for k in kurse}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=dienst.NICHT_ERLAUBT)
+    if payload.gruppe_id is not None:
+        # Group surface: a member of that group, and the group belongs to this course.
+        gruppe = await dienst.gruppe_person(db_session, payload.gruppe_id, user)
+        if gruppe is None or not gruppe.mitglied or gruppe.course_id != payload.course_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=dienst.NICHT_ERLAUBT)
     try:
         actor_id = await actor_von(db_session, user)
     except KennungVergeben:
         raise _kennung_vergeben() from None
-    return UrlRead(url=_uebergabe_url(basis, actor_id, payload.course_id))
+    return UrlRead(url=_uebergabe_url(basis, actor_id, payload.course_id, payload.gruppe_id))
 
 
 # --- Links --------------------------------------------------------------------------------
@@ -370,7 +383,9 @@ async def _einloesung_read(
     basis = os.environ.get(HUELLE_BASIS_ENV, "").strip().rstrip("/")
     if einloesung.course_id is not None and basis:
         try:
-            url = _uebergabe_url(basis, await actor_von(db_session, user), einloesung.course_id)
+            url = _uebergabe_url(
+                basis, await actor_von(db_session, user), einloesung.course_id, einloesung.gruppe_id
+            )
         except KennungVergeben:
             url = None  # the redemption stands; the course overview reports the conflict
     return EinloesungRead(

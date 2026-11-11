@@ -97,12 +97,27 @@ class Einloesung:
 
 
 @dataclass(frozen=True)
+class GruppeKurz:
+    id: int
+    name: str
+
+
+@dataclass(frozen=True)
 class KursEintrag:
     course_id: str
     course_uuid: str
     titel: str
-    gruppen: list[str]
+    gruppen: list[GruppeKurz]
     org_id: int
+
+
+@dataclass(frozen=True)
+class GruppePerson:
+    mitglied: bool
+    offen: bool
+    course_id: str
+    gruppe_name: str
+    anzeigename: str | None
 
 
 Person = PublicUser | User
@@ -586,16 +601,16 @@ async def kurse_der_person(db: AsyncSession, user: Person) -> list[KursEintrag]:
     if not org_ids:
         return []
 
-    gruppen: dict[int, list[str]] = {}
-    for course_pk, gruppenname in (
+    gruppen: dict[int, list[GruppeKurz]] = {}
+    for course_pk, gruppe_id, gruppenname in (
         await db.execute(
-            select(LearningGruppe.course_id, UserGroup.name)
+            select(LearningGruppe.course_id, LearningGruppe.id, UserGroup.name)
             .join(UserGroup, UserGroup.id == LearningGruppe.usergroup_id)
             .join(UserGroupUser, UserGroupUser.usergroup_id == UserGroup.id)
             .where(UserGroupUser.user_id == user_id, UserGroup.org_id.in_(org_ids))
         )
     ).all():
-        gruppen.setdefault(int(course_pk), []).append(gruppenname)
+        gruppen.setdefault(int(course_pk), []).append(GruppeKurz(id=int(gruppe_id), name=gruppenname))
 
     kurse = (
         await db.execute(
@@ -617,8 +632,43 @@ async def kurse_der_person(db: AsyncSession, user: Person) -> list[KursEintrag]:
                 course_id=course_id,
                 course_uuid=kurs.course_uuid,
                 titel=kurs.name,
-                gruppen=sorted(gruppen.get(int(kurs.id), [])),
+                gruppen=sorted(gruppen.get(int(kurs.id), []), key=lambda g: (g.name, g.id)),
                 org_id=int(kurs.org_id),
             )
         )
     return eintraege
+
+
+async def gruppe_person(db: AsyncSession, gruppe_id: int, user: Person) -> GruppePerson | None:
+    """Is ``user`` a member of the group? ``None`` for an unknown group.
+
+    Member means a ``usergroup_user`` row, whether or not the group is still open."""
+    zeile = (
+        await db.execute(
+            select(LearningGruppe, UserGroup.name)
+            .join(UserGroup, UserGroup.id == LearningGruppe.usergroup_id)
+            .where(LearningGruppe.id == gruppe_id)
+        )
+    ).first()
+    if zeile is None:
+        return None
+    gruppe, gruppenname = zeile
+    kurs = await db.get(Course, gruppe.course_id)
+    if kurs is None:
+        return None
+    try:
+        course_id = _course_id(kurs)
+    except HTTPException:  # not a Learning course
+        return None
+    eintrag = (
+        await db.execute(
+            select(UserGroupUser.id)
+            .where(UserGroupUser.usergroup_id == gruppe.usergroup_id, UserGroupUser.user_id == user.id)
+            .limit(1)
+        )
+    ).scalars().first()
+    konto = await db.get(User, user.id)
+    return GruppePerson(
+        mitglied=eintrag is not None, offen=bool(gruppe.offen), course_id=course_id,
+        gruppe_name=gruppenname, anzeigename=_anzeigename(konto) if konto is not None else None,
+    )

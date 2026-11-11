@@ -347,9 +347,9 @@ async def test_kurse_der_person(db, org, org2, leute, kurs_a, kurs_intern, kurs_
     await link_einloesen(db, t, person_a)
 
     kurse = await kurse_der_person(db, person_a)
-    assert [(k.course_id, k.course_uuid, k.titel, k.gruppen) for k in kurse] == [
+    assert [(k.course_id, k.course_uuid, k.titel, [(x.id, x.name) for x in k.gruppen]) for k in kurse] == [
         (_course_id(kurs_a), kurs_a.course_uuid, "Kurs A", []),
-        (_course_id(kurs_intern), kurs_intern.course_uuid, "Kurs Intern", ["Montag"]),
+        (_course_id(kurs_intern), kurs_intern.course_uuid, "Kurs Intern", [(g.id, "Montag")]),
     ]
     # Another provider's courses are never listed; without a group, unpublished stays hidden.
     assert [k.org_id for k in kurse] == [org.id, org.id]

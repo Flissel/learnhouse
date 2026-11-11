@@ -28,6 +28,8 @@ from src.services.learning.personen import actor_von
 from src.services.learning.uebergabe import read_uebergabe_token
 from src.services.learning.verwaltung import (
     GRUPPE_GESCHLOSSEN,
+    gruppe_anlegen,
+    link_einloesen,
     LINK_UNBEKANNT,
     LINK_ZURUECKGEZOGEN,
     NICHT_ERLAUBT,
@@ -140,7 +142,7 @@ async def test_routen_fehlen_ohne_lernmodus(db, monkeypatch) -> None:
         "/learning/verwaltung/gruppen/{gruppe_id}/schliessen", "/learning/verwaltung/personen",
         "/learning/verwaltung/personen/{user_id}", "/learning/einladung/{token}",
         "/learning/einladung/{token}/konto", "/learning/einladung/{token}/annehmen",
-        "/learning/anbieter", "/learning/personen/{actor_id}/kurse",
+        "/learning/anbieter", "/learning/personen/{actor_id}/kurse", "/learning/gruppen/{gruppe_id}/personen/{actor_id}",
     ):
         assert pfad in pfade, pfad
 
@@ -260,10 +262,12 @@ async def test_einladung_gruppe_annehmen_gibt_uebergabe(db, org, leute, kurs_a, 
     body = angenommen.json()
     assert (body["rolle"], body["gruppe_id"], body["course_id"]) == (
         "teilnehmend", gruppe.json()["gruppe_id"], _course_id(kurs_a))
-    uebergabe = _token_aus(body["uebergabe_url"], HUELLE + "/lernen/uebergabe/")
+    uebergabe = _token_aus(body["uebergabe_url"].split("?")[0], HUELLE + "/lernen/uebergabe/")
     assert read_uebergabe_token(uebergabe, key=SERVICE_KEY) == (
         await actor_von(db, leute["neu"]), _course_id(kurs_a))
-    assert uebersicht.json()["kurse"][0]["gruppen"] == ["Montag"]
+    assert uebersicht.json()["kurse"][0]["gruppen"] == [{"id": gruppe.json()["gruppe_id"], "name": "Montag"}]
+    # Teil C: the web opens the group surface from the hand-over URL.
+    assert body["uebergabe_url"].endswith(f"?gruppe={gruppe.json()['gruppe_id']}")
 
 
 async def test_einladung_410_mit_text(db, org, leute, lernmodus) -> None:
@@ -490,3 +494,65 @@ async def test_anbieter_im_lernmodus_ohne_free_plan_grenze(db, org, leute, lernm
 
     assert [r.status_code for r in angelegt] == [200] * 5, [r.text for r in angelegt]
     assert begrenzt.value.status_code == 403 and "Free plan" in str(begrenzt.value.detail)
+
+
+async def test_einloesen_gruppenlink_url_mit_gruppe(db, org, leute, kurs_a, lernmodus) -> None:
+    wer = _Wer()
+    wer.user = leute["leiter_a"]
+    async with _client(db, wer) as client:
+        gruppe = await client.post("/api/v1/learning/verwaltung/gruppen",
+                                   json={"org_id": org.id, "course_uuid": kurs_a.course_uuid, "name": "Montag"})
+        token = _token_aus(gruppe.json()["url"], WEB + "/einladung/")
+        wer.user = leute["neu"]
+        angenommen = await client.post(f"/api/v1/learning/einladung/{token}/annehmen")
+
+    gid = gruppe.json()["gruppe_id"]
+    url = angenommen.json()["uebergabe_url"]
+    assert url.startswith(HUELLE + "/lernen/uebergabe/") and url.endswith(f"?gruppe={gid}")
+
+
+async def test_kursuebersicht_gruppen_mit_id(db, org, leute, kurs_intern, lernmodus) -> None:
+    gruppe, token = await gruppe_anlegen(db, leute["leiter_a"], org.id, kurs_intern.course_uuid, "Montag")
+    await link_einloesen(db, token, leute["person_a"])
+    wer = _Wer()
+    wer.user = leute["person_a"]
+    async with _client(db, wer) as client:
+        uebersicht = await client.get("/api/v1/learning/verwaltung/kursuebersicht")
+
+    intern = [k for k in uebersicht.json()["kurse"] if k["titel"] == "Kurs Intern"]
+    assert intern[0]["gruppen"] == [{"id": gruppe.id, "name": "Montag"}]
+
+
+async def test_uebergabe_mit_gruppe_url_traegt_gruppe(db, org, leute, kurs_intern, lernmodus) -> None:
+    gruppe, token = await gruppe_anlegen(db, leute["leiter_a"], org.id, kurs_intern.course_uuid, "Montag")
+    await link_einloesen(db, token, leute["person_a"])
+    wer = _Wer()
+    wer.user = leute["person_a"]
+    async with _client(db, wer) as client:
+        antwort = await client.post("/api/v1/learning/uebergabe",
+                                    json={"course_id": _course_id(kurs_intern), "gruppe_id": gruppe.id})
+
+    assert antwort.status_code == 200
+    url = antwort.json()["url"]
+    assert url.endswith(f"?gruppe={gruppe.id}")
+    roh = _token_aus(url.split("?")[0], HUELLE + "/lernen/uebergabe/")
+    assert read_uebergabe_token(roh, key=SERVICE_KEY) == (
+        await actor_von(db, leute["person_a"]), _course_id(kurs_intern))
+
+
+async def test_uebergabe_fremde_gruppe_403(db, org, leute, kurs_a, kurs_intern, lernmodus) -> None:
+    gruppe, _ = await gruppe_anlegen(db, leute["leiter_a"], org.id, kurs_intern.course_uuid, "Montag")
+    andere, token = await gruppe_anlegen(db, leute["leiter_a"], org.id, kurs_intern.course_uuid, "Dienstag")
+    await link_einloesen(db, token, leute["person_a"])
+    wer = _Wer()
+    wer.user = leute["person_a"]
+    async with _client(db, wer) as client:
+        kein_mitglied = await client.post("/api/v1/learning/uebergabe",
+                                          json={"course_id": _course_id(kurs_intern), "gruppe_id": gruppe.id})
+        falscher_kurs = await client.post("/api/v1/learning/uebergabe",
+                                          json={"course_id": _course_id(kurs_a), "gruppe_id": andere.id})
+        unbekannt = await client.post("/api/v1/learning/uebergabe",
+                                      json={"course_id": _course_id(kurs_intern), "gruppe_id": 99999})
+
+    assert kein_mitglied.status_code == falscher_kurs.status_code == unbekannt.status_code == 403
+    assert kein_mitglied.json() == {"detail": NICHT_ERLAUBT}
