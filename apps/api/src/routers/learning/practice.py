@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 from typing import Annotated, Any, Literal
@@ -35,8 +36,11 @@ from src.security.rbac import AccessAction
 from src.services.learning.personen import KennungVergeben, _org_of, actor_von, learner_id  # noqa: F401
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 MCP_URL_ENV = "LEARNING_MCP_URL"
 _TIMEOUT_S = 660.0
+# Group capacity is read for invitations and the administration, never for a learner.
+_KAPAZITAET_ACTOR = {"actor_id": "learnhouse-gruppen", "actor_type": "system"}
 
 
 class _Strict(BaseModel):
@@ -110,6 +114,27 @@ async def _call(tool: str, event: dict[str, Any], *, write: bool = False, fresh:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(detail)[:300])
     return {"state": payload.get("state"), "result": _absolute_media(payload.get("result") or {}),
             "evidence": payload.get("evidence")}
+
+
+async def gruppen_kapazitaet(course_id: str) -> int | None:
+    """Places of a new group canvas of this Learning course (learning-mcp ``learning_group_capacity``).
+
+    ``None`` when learning-mcp is unreachable or gives no usable answer: callers then let the
+    person in (fail-open) and only log; the Lern-Hülle still refuses a folder that does not fit."""
+    try:
+        antwort = await _call("learning_group_capacity", {
+            "event_type": "learning.group.capacity", "actor": dict(_KAPAZITAET_ACTOR), "course_id": course_id,
+            "payload": {},
+        })
+    except Exception as error:  # noqa: BLE001 - fail-open by decision; only the type is logged
+        logger.warning("learning group capacity unavailable: %s", type(error).__name__)
+        return None
+    result = antwort.get("result") if isinstance(antwort, dict) else None
+    wert = result.get("kapazitaet") if isinstance(result, dict) else None
+    if antwort.get("state") != "completed" or type(wert) is not int or wert < 1:
+        logger.warning("learning group capacity: no usable answer")
+        return None
+    return wert
 
 
 _MEDIA_PATH = re.compile(r"^/lernsequenz-medien/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.(png|jpg|webp)$")

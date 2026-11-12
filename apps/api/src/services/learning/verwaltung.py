@@ -11,19 +11,25 @@ would refuse a Teilnehmende joining by link or a Kursleiter removing someone. Th
 therefore writes the same tables through the same models, after its own rights check.
 
 Only ``sha256(token)`` is stored; the plain token is returned once and never logged.
+
+Group capacity: a group canvas holds only so many folders (Mappen). Joining a group by link is
+refused once the group has as many members as the canvas of its course holds; the number comes
+from learning-mcp through a ``Kapazitaet`` source the routes pass in. Unknown capacity lets the
+person in (fail-open): the Lern-Hülle still refuses a folder that does not fit.
 """
 
 from __future__ import annotations
 
 import hashlib
 import secrets
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import IntEnum
 from uuid import uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.courses.courses import Course
@@ -44,6 +50,15 @@ ROOT_BLEIBT = "Das Root-Konto kann nicht entfernt werden."
 KEIN_ADMIN_ENTFERNEN = "Kursleiter können keine Admins entfernen."
 LETZTER_ADMIN = "Der letzte Admin eines Anbieters kann nicht entfernt werden."
 NICHT_ERLAUBT = "Nicht erlaubt."
+
+
+def gruppe_voll_text(hoechstens: int) -> str:
+    personen = "Person" if hoechstens == 1 else "Personen"
+    return f"Diese Gruppe ist voll (höchstens {hoechstens} {personen}). Bitte wenden Sie sich an Ihre Kursleitung."
+
+
+# Learning ``course_id`` -> places of a new group canvas of that course; ``None``: unknown.
+Kapazitaet = Callable[[str], Awaitable[int | None]]
 
 LINK_GUELTIG = timedelta(days=7)
 
@@ -80,11 +95,16 @@ class Verweigert(Exception):
 
 
 class LinkUngueltig(Exception):
-    """The invitation link cannot be redeemed (route: 410)."""
+    """The invitation link cannot be redeemed (route: 410). ``voll`` carries the group's limit."""
 
-    def __init__(self, grund: str) -> None:
+    def __init__(self, grund: str, *, hoechstens: int | None = None) -> None:
         self.grund = grund
-        self.text = _LINK_TEXTE[grund]
+        if grund == "voll":
+            if hoechstens is None:
+                raise ValueError("a full group names its limit")
+            self.text = gruppe_voll_text(hoechstens)
+        else:
+            self.text = _LINK_TEXTE[grund]
         super().__init__(self.text)
 
 
@@ -252,12 +272,75 @@ async def gueltiger_link(
     return link, gruppe
 
 
+async def _in_gruppe(db: AsyncSession, gruppe: LearningGruppe, user_id: int) -> bool:
+    return (
+        await db.execute(
+            select(UserGroupUser.id).where(
+                UserGroupUser.usergroup_id == gruppe.usergroup_id, UserGroupUser.user_id == user_id
+            ).limit(1)
+        )
+    ).scalars().first() is not None
+
+
+async def mitglieder_zahl(db: AsyncSession, gruppe: LearningGruppe) -> int:
+    """Members of the group as ``gruppe_person`` counts them: in its usergroup and in its provider."""
+    return int(
+        (
+            await db.execute(
+                select(func.count(func.distinct(UserGroupUser.user_id)))
+                .join(UserGroup, UserGroup.id == UserGroupUser.usergroup_id)
+                .join(
+                    UserOrganization,
+                    (UserOrganization.user_id == UserGroupUser.user_id)
+                    & (UserOrganization.org_id == UserGroup.org_id),
+                )
+                .where(UserGroupUser.usergroup_id == gruppe.usergroup_id)
+            )
+        ).scalar_one()
+    )
+
+
+async def gruppen_kapazitaet(
+    db: AsyncSession, gruppe: LearningGruppe, kapazitaet: Kapazitaet | None
+) -> int | None:
+    """Places of the group's canvas from ``kapazitaet``; ``None`` when unknown (no source, no Learning course)."""
+    if kapazitaet is None:
+        return None
+    kurs = await db.get(Course, gruppe.course_id)
+    if kurs is None:
+        return None
+    try:
+        course_id = _course_id(kurs)
+    except HTTPException:  # not a Learning course
+        return None
+    return await kapazitaet(course_id)
+
+
+async def platz_pruefen(
+    db: AsyncSession, gruppe: LearningGruppe | None, user_id: int | None, kapazitaet: Kapazitaet | None
+) -> None:
+    """``LinkUngueltig("voll")`` when a NEW member would join a group that already has as many members
+    as its canvas holds. Members (``user_id`` in the group) are never refused; unknown capacity lets in."""
+    if gruppe is None or kapazitaet is None:
+        return
+    if user_id is not None and await _in_gruppe(db, gruppe, user_id):
+        return
+    hoechstens = await gruppen_kapazitaet(db, gruppe, kapazitaet)
+    if hoechstens is not None and await mitglieder_zahl(db, gruppe) >= hoechstens:
+        raise LinkUngueltig("voll", hoechstens=hoechstens)
+
+
 async def link_einloesen(
-    db: AsyncSession, token: str, user: Person, jetzt: datetime | None = None
+    db: AsyncSession,
+    token: str,
+    user: Person,
+    jetzt: datetime | None = None,
+    kapazitaet: Kapazitaet | None = None,
 ) -> Einloesung:
     """Redeem a link: new members get the link's role, members are only ever upgraded.
 
-    A group link also adds the person to the group's ``usergroup``."""
+    A group link also adds the person to the group's ``usergroup``, unless the group is full
+    (``kapazitaet``, checked before anything is written)."""
     user_id = user.id
     link, gruppe = await gueltiger_link(db, token, jetzt)
     org_id = link.org_id
@@ -265,6 +348,7 @@ async def link_einloesen(
     vermerk = await db.get(LearningEntfernung, (user_id, org_id))
     if vermerk is not None and _utc(vermerk.entfernt_am) >= _utc(link.erstellt_am):
         raise LinkUngueltig("zurueckgezogen")
+    await platz_pruefen(db, gruppe, user_id, kapazitaet)
     neue_rolle = _LINK_ROLLE[link.art]
     jetzt_text = str(datetime.now())
 
@@ -475,6 +559,8 @@ class LinkEintrag:
     gruppe: str | None
     erstellt_am: datetime
     laeuft_ab: datetime | None
+    mitglieder: int | None = None  # group links: members now
+    kapazitaet: int | None = None  # group links: places of the canvas, None when unknown
 
 
 @dataclass(frozen=True)
@@ -514,9 +600,15 @@ async def rollen_der_person(db: AsyncSession, user: Person) -> list[AnbieterRoll
 
 
 async def aktive_links(
-    db: AsyncSession, akteur: Person, org_id: int, jetzt: datetime | None = None
+    db: AsyncSession,
+    akteur: Person,
+    org_id: int,
+    jetzt: datetime | None = None,
+    kapazitaet: Kapazitaet | None = None,
 ) -> list[LinkEintrag]:
-    """Links of the provider that still admit someone (admin links: shown to Root only)."""
+    """Links of the provider that still admit someone (admin links: shown to Root only).
+
+    Group links carry the number of members and, from ``kapazitaet``, how many the canvas holds."""
     akteur_id = akteur.id
     jetzt = _utc(jetzt)
     rolle = await _darf_verwalten(db, akteur_id, org_id)
@@ -530,6 +622,7 @@ async def aktive_links(
         )
     ).all()
     eintraege: list[LinkEintrag] = []
+    plaetze: dict[int, int | None] = {}  # per course: one question to learning-mcp per listing
     for link, gruppenname, offen in zeilen:
         if link.laeuft_ab is not None and jetzt >= _utc(link.laeuft_ab):
             continue
@@ -537,11 +630,19 @@ async def aktive_links(
             continue
         if link.art == "admin" and rolle is not Rolle.ROOT:
             continue
+        mitglieder = hoechstens = None
+        gruppe = await db.get(LearningGruppe, link.gruppe_id) if link.gruppe_id is not None else None
+        if gruppe is not None:
+            mitglieder = await mitglieder_zahl(db, gruppe)
+            if gruppe.course_id not in plaetze:
+                plaetze[gruppe.course_id] = await gruppen_kapazitaet(db, gruppe, kapazitaet)
+            hoechstens = plaetze[gruppe.course_id]
         eintraege.append(
             LinkEintrag(
                 link_id=int(link.id), art=link.art, gruppe_id=link.gruppe_id, gruppe=gruppenname,
                 erstellt_am=_utc(link.erstellt_am),
                 laeuft_ab=_utc(link.laeuft_ab) if link.laeuft_ab is not None else None,
+                mitglieder=mitglieder, kapazitaet=hoechstens,
             )
         )
     return eintraege

@@ -27,6 +27,7 @@ from src.db.organizations import Organization, OrganizationCreate
 from src.db.user_organizations import UserOrganization
 from src.db.users import AnonymousUser, PublicUser, User, UserCreate
 from src.routers.auth import set_auth_cookies
+from src.routers.learning import practice
 from src.routers.learning.bootstrap import require_local_learning_bootstrap
 from src.security.auth import get_authenticated_user
 from src.security.session_context import AUTH_METHOD_PASSWORD
@@ -94,6 +95,18 @@ def _link_ungueltig(fehler: dienst.LinkUngueltig) -> JSONResponse:
     return JSONResponse(
         status_code=status.HTTP_410_GONE, content={"detail": fehler.text, "grund": fehler.grund}
     )
+
+
+def _kapazitaet_einmal() -> dienst.Kapazitaet:
+    """Group capacity from learning-mcp, asked at most once per course within one request."""
+    gemerkt: dict[str, int | None] = {}
+
+    async def kapazitaet(course_id: str) -> int | None:
+        if course_id not in gemerkt:
+            gemerkt[course_id] = await practice.gruppen_kapazitaet(course_id)
+        return gemerkt[course_id]
+
+    return kapazitaet
 
 
 def _kennung_vergeben() -> HTTPException:
@@ -199,6 +212,9 @@ class LinkRead(BaseModel):
     gruppe: str | None
     erstellt_am: datetime
     laeuft_ab: datetime | None
+    # Group links: members now and the places of the canvas (None: unknown / not a group).
+    mitglieder: int | None = None
+    kapazitaet: int | None = None
 
 
 @router.post("/verwaltung/links", response_model=LinkErzeugtRead)
@@ -238,12 +254,13 @@ async def get_links(
     db_session: AsyncSession = Depends(get_db_session),
 ) -> list[LinkRead]:
     try:
-        links = await dienst.aktive_links(db_session, user, org_id)
+        links = await dienst.aktive_links(db_session, user, org_id, kapazitaet=_kapazitaet_einmal())
     except dienst.Verweigert as fehler:
         raise _verweigert(fehler) from None
     return [
         LinkRead(link_id=l.link_id, art=l.art, gruppe_id=l.gruppe_id, gruppe=l.gruppe,
-                 erstellt_am=l.erstellt_am, laeuft_ab=l.laeuft_ab)
+                 erstellt_am=l.erstellt_am, laeuft_ab=l.laeuft_ab, mitglieder=l.mitglieder,
+                 kapazitaet=l.kapazitaet)
         for l in links
     ]
 
@@ -407,7 +424,7 @@ async def post_einladung_annehmen(
     db_session: AsyncSession = Depends(get_db_session),
 ):
     try:
-        einloesung = await dienst.link_einloesen(db_session, token, user)
+        einloesung = await dienst.link_einloesen(db_session, token, user, kapazitaet=_kapazitaet_einmal())
     except dienst.LinkUngueltig as fehler:
         return _link_ungueltig(fehler)
     return await _einloesung_read(db_session, user, einloesung)
@@ -421,9 +438,11 @@ async def post_einladung_konto(
     response: Response,
     db_session: AsyncSession = Depends(get_db_session),
 ):
-    """A new account through a valid link: created, link redeemed, signed in like /auth/login."""
+    """A new account through a valid link: created, link redeemed, signed in like /auth/login.
+
+    A full group is refused before the account exists (no account without its group)."""
     try:
-        link, _ = await dienst.gueltiger_link(db_session, token)
+        link, gruppe = await dienst.gueltiger_link(db_session, token)
     except dienst.LinkUngueltig as fehler:
         return _link_ungueltig(fehler)
     org_id = int(link.org_id)
@@ -440,6 +459,11 @@ async def post_einladung_konto(
             headers={"Retry-After": str(retry_after)},
         )
     await enforce_login_auth_method(db_session, org_id, AUTH_METHOD_PASSWORD)
+    kapazitaet = _kapazitaet_einmal()
+    try:
+        await dienst.platz_pruefen(db_session, gruppe, None, kapazitaet)
+    except dienst.LinkUngueltig as fehler:
+        return _link_ungueltig(fehler)
 
     neu = await create_user(
         request, db_session, AnonymousUser(),
@@ -450,9 +474,9 @@ async def post_einladung_konto(
         org_id, signup_provider="invite",
     )
     try:
-        einloesung = await dienst.link_einloesen(db_session, token, neu)
+        einloesung = await dienst.link_einloesen(db_session, token, neu, kapazitaet=kapazitaet)
     except dienst.LinkUngueltig as fehler:
-        # Withdrawn in between: create_user's Teilnehmende membership must not outlive the link.
+        # Withdrawn (or filled up) in between: create_user's Teilnehmende membership must not outlive the link.
         await db_session.execute(
             delete(UserOrganization).where(
                 UserOrganization.user_id == neu.id, UserOrganization.org_id == org_id

@@ -376,7 +376,8 @@ async def test_gruppe_schliessen_und_links_ohne_token(db, org, org2, leute, kurs
     eintraege = aktiv.json()
     assert sorted(e["art"] for e in eintraege) == ["gruppe", "kursleiter"]
     for eintrag in eintraege:
-        assert set(eintrag) == {"link_id", "art", "gruppe_id", "gruppe", "erstellt_am", "laeuft_ab"}
+        assert set(eintrag) == {"link_id", "art", "gruppe_id", "gruppe", "erstellt_am", "laeuft_ab",
+                                "mitglieder", "kapazitaet"}
     assert token not in aktiv.text and _token_aus(link.json()["url"], WEB + "/einladung/") not in aktiv.text
     assert fremd_liste.status_code == fremd_zu.status_code == 403
     assert zu.status_code == 204
