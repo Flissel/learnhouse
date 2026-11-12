@@ -91,6 +91,9 @@ export interface KontoDaten {
   email: string
   username: string
   password: string
+  /** Optional; shown to the group instead of the username. Empty means not set. */
+  vorname?: string
+  nachname?: string
 }
 
 export type EinladungZustand =
@@ -346,7 +349,12 @@ export async function einladungAnnehmen(linkToken: string, accessToken?: string)
 
 /** A new account through the link; the backend signs the person in with cookies. */
 export async function kontoAnlegen(linkToken: string, konto: KontoDaten): Promise<Einloesung> {
-  return alsEinloesung(await anfrage(`${einladungPfad(linkToken)}/konto`, 'POST', undefined, konto))
+  const { vorname, nachname, ...pflicht } = konto
+  // Empty names are left out, so the body stays what the API accepted before the names.
+  const body: Record<string, string> = { ...pflicht }
+  if (vorname?.trim()) body.vorname = vorname.trim()
+  if (nachname?.trim()) body.nachname = nachname.trim()
+  return alsEinloesung(await anfrage(`${einladungPfad(linkToken)}/konto`, 'POST', undefined, body))
 }
 
 /** The sign-in of the web (`useAuth().signIn`), passed in so this module stays free of React. */

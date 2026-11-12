@@ -47,13 +47,23 @@ function feld(form: FormData, name: string): string {
   return typeof value === 'string' ? value : ''
 }
 
+/** The "Konto anlegen" form as account data; the password is passed on untrimmed. */
+export function kontoAusFormular(form: FormData): KontoDaten {
+  return {
+    email: feld(form, 'email').trim(),
+    username: feld(form, 'username').trim(),
+    password: feld(form, 'password'),
+    vorname: feld(form, 'vorname').trim(),
+    nachname: feld(form, 'nachname').trim(),
+  }
+}
+
 export function EinladungAnsicht({
   zustand, angemeldet, loginHref, onAnnehmen, onKontoAnlegen, beschaeftigt = false, meldung,
 }: EinladungAnsichtProps) {
   function absenden(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    onKontoAnlegen({ email: feld(form, 'email').trim(), username: feld(form, 'username').trim(), password: feld(form, 'password') })
+    onKontoAnlegen(kontoAusFormular(new FormData(event.currentTarget)))
   }
 
   return (
@@ -92,6 +102,19 @@ export function EinladungAnsicht({
                     E-Mail
                     <input autoComplete="email" className={fieldClass} name="email" required type="email" />
                   </label>
+                  <div className="flex flex-col gap-1">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <label className="text-sm font-semibold text-zinc-700">
+                        Vorname
+                        <input autoComplete="given-name" className={fieldClass} defaultValue="" maxLength={100} name="vorname" type="text" />
+                      </label>
+                      <label className="text-sm font-semibold text-zinc-700">
+                        Nachname
+                        <input autoComplete="family-name" className={fieldClass} defaultValue="" maxLength={100} name="nachname" type="text" />
+                      </label>
+                    </div>
+                    <p className="text-xs text-zinc-600">Ihr Name wird den anderen in der Gruppe angezeigt.</p>
+                  </div>
                   <label className="text-sm font-semibold text-zinc-700">
                     Benutzername
                     <input autoComplete="username" className={fieldClass} maxLength={100} name="username" required type="text" />

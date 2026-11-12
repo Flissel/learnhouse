@@ -9,7 +9,7 @@ import {
   kontoAnlegenUndAnmelden,
   zielNachEinloesung,
 } from '@/services/learning/verwaltung'
-import { EinladungAnsicht, type EinladungAnsichtProps } from './Einladung'
+import { EinladungAnsicht, kontoAusFormular, type EinladungAnsichtProps } from './Einladung'
 
 const originalFetch = globalThis.fetch
 afterEach(() => {
@@ -71,6 +71,68 @@ describe('Einladungsseite', () => {
     expect(html).toContain('Ich habe schon ein Konto')
     expect(html).toContain('href="/login?next=%2Feinladung%2Ftok"')
     expect(html).not.toContain('Einladung annehmen')
+  })
+
+  test('Formular fragt Vor- und Nachnamen vor dem Benutzernamen ab, mit Hinweis', () => {
+    const html = render({ angemeldet: false })
+
+    expect(html).toContain('Vorname')
+    expect(html).toContain('Nachname')
+    expect(html).toContain('name="vorname"')
+    expect(html).toContain('name="nachname"')
+    expect(html).toContain('Ihr Name wird den anderen in der Gruppe angezeigt.')
+    expect(html.indexOf('name="vorname"')).toBeLessThan(html.indexOf('name="nachname"'))
+    expect(html.indexOf('name="nachname"')).toBeLessThan(html.indexOf('name="username"'))
+    // Optional: kein Pflichtfeld.
+    expect(html).not.toMatch(/name="vorname"[^>]*required/)
+    expect(html).not.toMatch(/name="nachname"[^>]*required/)
+  })
+
+  test('das Formular reicht Vor- und Nachnamen an onKontoAnlegen weiter', () => {
+    const form = new FormData()
+    form.set('vorname', ' Vor ')
+    form.set('nachname', 'Nach ')
+    form.set('email', ' person-a@example.org ')
+    form.set('username', 'person-a ')
+    form.set('password', ' geheim-genug ')
+
+    expect(kontoAusFormular(form)).toEqual({
+      email: 'person-a@example.org', username: 'person-a', password: ' geheim-genug ',
+      vorname: 'Vor', nachname: 'Nach',
+    })
+
+    const ohneNamen = new FormData()
+    ohneNamen.set('email', 'person-b@example.org')
+    ohneNamen.set('username', 'person-b')
+    ohneNamen.set('password', 'geheim-genug')
+    expect(kontoAusFormular(ohneNamen)).toEqual({
+      email: 'person-b@example.org', username: 'person-b', password: 'geheim-genug', vorname: '', nachname: '',
+    })
+  })
+
+  test('Vor- und Nachname gehen bis in den API-Aufruf; leere Namen werden nicht gesendet', async () => {
+    const gesendet: unknown[] = []
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      gesendet.push(JSON.parse(String(init?.body)))
+      return new Response(JSON.stringify({
+        org_id: 1, rolle: 'teilnehmend', gruppe_id: 3, course_id: 'kurs-a', uebergabe_url: null,
+      }), { status: 200 })
+    }) as typeof fetch
+    const anmelden = async () => ({ ok: true })
+
+    await kontoAnlegenUndAnmelden('tok', {
+      email: 'person-a@example.org', username: 'person-a', password: 'geheim-genug',
+      vorname: 'Vor', nachname: 'Nach',
+    }, anmelden)
+    await kontoAnlegenUndAnmelden('tok', {
+      email: 'person-b@example.org', username: 'person-b', password: 'geheim-genug',
+      vorname: '  ', nachname: '',
+    }, anmelden)
+
+    expect(gesendet).toEqual([
+      { email: 'person-a@example.org', username: 'person-a', password: 'geheim-genug', vorname: 'Vor', nachname: 'Nach' },
+      { email: 'person-b@example.org', username: 'person-b', password: 'geheim-genug' },
+    ])
   })
 
   test('annehmen ruft die Route; weiter zur Übergabe oder, ohne sie, zur Kursübersicht', async () => {
