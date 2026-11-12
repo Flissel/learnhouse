@@ -20,6 +20,7 @@ from starlette.middleware.gzip import GZipMiddleware, GZipResponder, IdentityRes
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from config.config import LearnHouseConfig, get_learnhouse_config
+from src.core.access_log_redaction import install_access_log_redaction
 from src.core.ee_hooks import register_ee_middlewares
 from src.core.events.events import shutdown_app, startup_app
 from src.core.middleware.cors import configure_cors
@@ -29,6 +30,10 @@ from src.routers.local_content import router as local_content_router
 
 
 learnhouse_config: LearnHouseConfig = get_learnhouse_config()
+
+# Mask invitation/link tokens and sensitive query values in uvicorn's access
+# log. Registered at import time so it applies regardless of the start command.
+install_access_log_redaction()
 
 # Health probes fail loudly on purpose — a 503 from /health is how Kubernetes
 # learns to take the pod out of rotation. It is not a second, separate incident
