@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Check, Copy } from 'lucide-react'
 import {
   aktiveLinks,
+  belegungText,
   darfVerwalten,
   gruppeAnlegen,
   gruppeSchliessen,
@@ -135,6 +136,37 @@ function linkBeschreibung(link: AktiverLink): string {
   if (link.art === 'kursleiter') return 'Kursleiter-Link'
   if (link.art === 'admin') return 'Admin-Link'
   return 'Einladungslink'
+}
+
+/** The open groups with how full each is ("n von höchstens N Personen", or "n Personen"). */
+export function GruppenListe({ gruppen, onSchliessen, beschaeftigt }: {
+  gruppen: AktiverLink[]
+  onSchliessen: (gruppeId: number) => void
+  beschaeftigt?: boolean
+}) {
+  if (gruppen.length === 0) return null
+  return (
+    <ul className="flex flex-col divide-y divide-zinc-100">
+      {gruppen.map((link) => {
+        const belegung = belegungText(link)
+        return (
+          <li className="flex flex-wrap items-center gap-3 py-2" key={link.link_id}>
+            <span className="min-w-0 flex-1 break-words text-sm font-semibold">{linkBeschreibung(link)}</span>
+            {belegung ? <span className="text-xs text-zinc-600">{belegung}</span> : null}
+            <span className="text-xs text-zinc-500">seit {datum(link.erstellt_am)}</span>
+            <button
+              className={secondaryButton}
+              disabled={beschaeftigt}
+              onClick={() => { if (link.gruppe_id !== null) onSchliessen(link.gruppe_id) }}
+              type="button"
+            >
+              Gruppe schließen
+            </button>
+          </li>
+        )
+      })}
+    </ul>
+  )
 }
 
 /** Management for admins, course leaders and root: groups, course-leader links, people. */
@@ -343,24 +375,7 @@ function VerwaltungInhalt({ kurse, rollen, accessToken }: VerwaltungProps) {
         </form>
         <Hinweis text={gruppeFehler} />
         {neueGruppe ? <LinkAnzeige url={neueGruppe.url} /> : null}
-        {offeneGruppen.length ? (
-          <ul className="flex flex-col divide-y divide-zinc-100">
-            {offeneGruppen.map((link) => (
-              <li className="flex flex-wrap items-center gap-3 py-2" key={link.link_id}>
-                <span className="min-w-0 flex-1 break-words text-sm font-semibold">{linkBeschreibung(link)}</span>
-                <span className="text-xs text-zinc-500">seit {datum(link.erstellt_am)}</span>
-                <button
-                  className={secondaryButton}
-                  disabled={beschaeftigt !== null}
-                  onClick={() => { if (link.gruppe_id !== null) schliessen(link.gruppe_id) }}
-                  type="button"
-                >
-                  Gruppe schließen
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : null}
+        <GruppenListe beschaeftigt={beschaeftigt !== null} gruppen={offeneGruppen} onSchliessen={schliessen} />
       </section>
 
       <section aria-labelledby="kursleiter-link" className={sectionClass}>

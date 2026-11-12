@@ -7,6 +7,7 @@ import {
   einladungLesen,
   kontoAnlegen,
   kontoAnlegenUndAnmelden,
+  nachAblehnung,
   zielNachEinloesung,
 } from '@/services/learning/verwaltung'
 import { EinladungAnsicht, kontoAusFormular, type EinladungAnsichtProps } from './Einladung'
@@ -204,5 +205,39 @@ describe('Einladungsseite', () => {
     }
     expect(text).not.toContain('Email')
     expect(text).toContain('Bitte versuchen Sie es')
+  })
+
+  test('volle Gruppe beim Annehmen und beim Konto: nur der Text, kein Formular, kein Knopf', async () => {
+    const voll = 'Diese Gruppe ist voll (höchstens 10 Personen). Bitte wenden Sie sich an Ihre Kursleitung.'
+    const konto = { email: 'person-a@example.org', username: 'person-a', password: 'geheim-genug' }
+
+    for (const einloesen of [
+      () => einladungAnnehmen('tok', 'zugang'),
+      () => kontoAnlegenUndAnmelden('tok', konto, async () => ({ ok: true })),
+    ]) {
+      antwortet(410, { detail: voll, grund: 'voll' })
+      let abgelehnt: ReturnType<typeof nachAblehnung> | null = null
+      try {
+        await einloesen()
+      } catch (fehler) {
+        abgelehnt = nachAblehnung(fehler)
+      }
+      expect(abgelehnt).toEqual({ art: 'ungueltig', text: voll })
+      if (abgelehnt?.art !== 'ungueltig') throw new Error('erwartet: ungueltig')
+
+      for (const angemeldet of [true, false]) {
+        const html = render({ angemeldet, zustand: abgelehnt })
+        expect(html).toContain('Diese Gruppe ist voll (höchstens 10 Personen).')
+        expect(html).not.toContain('<form')
+        expect(html).not.toContain('Konto anlegen')
+        expect(html).not.toContain('Einladung annehmen')
+      }
+    }
+  })
+
+  test('andere Ablehnungen bleiben eine Meldung über dem Formular', () => {
+    expect(nachAblehnung(new Error('netz'))).toEqual({
+      art: 'meldung', text: 'Das hat gerade nicht geklappt. Bitte versuchen Sie es noch einmal.',
+    })
   })
 })

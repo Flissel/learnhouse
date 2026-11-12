@@ -59,6 +59,10 @@ export interface AktiverLink {
   gruppe: string | null
   erstellt_am: string
   laeuft_ab: string | null
+  /** Group links only: members now; null (or missing) for other links. */
+  mitglieder?: number | null
+  /** Group links only: how many people the group surface of the course holds; null when unknown. */
+  kapazitaet?: number | null
 }
 
 export interface GruppeErzeugt {
@@ -126,6 +130,15 @@ export function verwaltbareAnbieter(rollen: readonly AnbieterRolle[]): AnbieterR
 /** After redeeming a link: straight to the own Lern-Hülle, or to the course overview. */
 export function zielNachEinloesung(einloesung: Pick<Einloesung, 'uebergabe_url'>): string {
   return einloesung.uebergabe_url ?? KURSUEBERSICHT_PFAD
+}
+
+/** How full a group is: "n von höchstens N Personen", or "n Personen" while the limit is unknown. */
+export function belegungText(link: Pick<AktiverLink, 'mitglieder' | 'kapazitaet'>): string | null {
+  const n = link.mitglieder
+  if (n === null || n === undefined) return null
+  const hoechstens = link.kapazitaet
+  if (hoechstens === null || hoechstens === undefined) return `${n} ${n === 1 ? 'Person' : 'Personen'}`
+  return `${n} von höchstens ${hoechstens} ${hoechstens === 1 ? 'Person' : 'Personen'}`
 }
 
 /** The text to show for anything a call threw: only texts meant for people get through. */
@@ -205,11 +218,16 @@ function istPerson(value: unknown): value is Person {
     && istRolle(value.rolle) && istStringListe(value.gruppen)
 }
 
+function istLeerOderZahl(value: unknown): boolean {
+  return value === undefined || value === null || istZahl(value)
+}
+
 function istAktiverLink(value: unknown): value is AktiverLink {
   return isRecord(value) && istZahl(value.link_id) && istString(value.art)
     && (value.gruppe_id === null || istZahl(value.gruppe_id))
     && (value.gruppe === null || istString(value.gruppe))
     && istString(value.erstellt_am) && (value.laeuft_ab === null || istString(value.laeuft_ab))
+    && istLeerOderZahl(value.mitglieder) && istLeerOderZahl(value.kapazitaet)
 }
 
 function erwarte<T>(data: unknown, pruefe: (value: unknown) => value is T): T {
@@ -331,6 +349,15 @@ export async function personEntfernen(userId: number, orgId: number, accessToken
 // --- Invitations ----------------------------------------------------------------------------
 
 const einladungPfad = (linkToken: string) => `einladung/${encodeURIComponent(linkToken)}`
+
+/**
+ * After a refused redemption. A 410 (withdrawn, expired, or the group is full) replaces the
+ * page by its text, without form or button; anything else is a message above the form.
+ */
+export function nachAblehnung(fehler: unknown): { art: 'ungueltig'; text: string } | { art: 'meldung'; text: string } {
+  if (fehler instanceof LernFehler && fehler.status === 410) return { art: 'ungueltig', text: fehler.message }
+  return { art: 'meldung', text: meldungAus(fehler) }
+}
 
 /** What a link invites to (public). An invalid link is a state of the page, not an error. */
 export async function einladungLesen(linkToken: string): Promise<EinladungZustand> {

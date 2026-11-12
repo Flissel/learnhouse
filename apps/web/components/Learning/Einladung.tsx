@@ -8,8 +8,7 @@ import {
   einladungAnnehmen,
   einladungLesen,
   kontoAnlegenUndAnmelden,
-  LernFehler,
-  meldungAus,
+  nachAblehnung,
   zielNachEinloesung,
   type EinladungInfo,
   type EinladungZustand,
@@ -159,8 +158,10 @@ export default function Einladung({ token }: { token: string }) {
     try {
       window.location.assign(zielNachEinloesung(await arbeit()))
     } catch (fehler) {
-      if (fehler instanceof LernFehler && fehler.status === 410) setZustand({ art: 'ungueltig', text: fehler.message })
-      else setMeldung(meldungAus(fehler))
+      // Withdrawn, expired or a full group: only the text stays, no form.
+      const abgelehnt = nachAblehnung(fehler)
+      if (abgelehnt.art === 'ungueltig') setZustand(abgelehnt)
+      else setMeldung(abgelehnt.text)
       setBeschaeftigt(false)
     }
   }
