@@ -27,6 +27,7 @@ from src.services.learning.kurs_kennung import _course_id
 from src.services.learning.personen import actor_von
 from src.services.learning.uebergabe import read_uebergabe_token
 from src.services.learning.verwaltung import (
+    _anzeigename,
     GRUPPE_GESCHLOSSEN,
     gruppe_anlegen,
     link_einloesen,
@@ -239,6 +240,57 @@ async def test_einladung_konto_anlegen_meldet_an(db, org, leute, lernmodus) -> N
     assert zugang and decode_jwt(zugang)["sub"] == "person-d@example.com"
     neu = (await db.execute(select(User).where(User.username == "person-d"))).scalars().one()
     assert await rolle_von(db, neu, org.id) is Rolle.KURSLEITER
+    # Without a name (old clients), the group shows the username as before.
+    assert (neu.first_name, neu.last_name) == ("", "")
+    assert _anzeigename(neu) == "person-d"
+
+
+async def _konto_anlegen_ueber_link(db, org, leute, body: dict):
+    wer = _Wer()
+    wer.user = leute["leiter_a"]
+    async with _client(db, wer) as client:
+        erzeugt = await client.post("/api/v1/learning/verwaltung/links", json={"art": "kursleiter", "org_id": org.id})
+        wer.user = None
+        token = _token_aus(erzeugt.json()["url"], WEB + "/einladung/")
+        with _ohne_nebenwirkungen():
+            return await client.post(f"/api/v1/learning/einladung/{token}/konto", json=body)
+
+
+async def test_einladung_konto_mit_namen_zeigt_namen(db, org, leute, lernmodus) -> None:
+    konto = await _konto_anlegen_ueber_link(db, org, leute, {
+        "email": "person-f@example.org", "username": "person-f", "password": PASSWORT,
+        "vorname": "  Vor ", "nachname": "Nach  ",
+    })
+
+    assert konto.status_code == 200, konto.text
+    neu = (await db.execute(select(User).where(User.username == "person-f"))).scalars().one()
+    assert (neu.first_name, neu.last_name) == ("Vor", "Nach")
+    assert _anzeigename(neu) == "Vor Nach"
+
+
+async def test_einladung_konto_leerer_name_gilt_als_nicht_gesetzt(db, org, leute, lernmodus) -> None:
+    konto = await _konto_anlegen_ueber_link(db, org, leute, {
+        "email": "person-g@example.org", "username": "person-g", "password": PASSWORT,
+        "vorname": "   ", "nachname": "",
+    })
+
+    assert konto.status_code == 200, konto.text
+    neu = (await db.execute(select(User).where(User.username == "person-g"))).scalars().one()
+    assert (neu.first_name, neu.last_name) == ("", "")
+    assert _anzeigename(neu) == "person-g"
+
+
+@pytest.mark.parametrize("feld", ["vorname", "nachname"])
+async def test_einladung_konto_zu_langer_name_422(db, org, leute, lernmodus, feld) -> None:
+    konten_vorher = await _anzahl(db, User)
+    konto = await _konto_anlegen_ueber_link(db, org, leute, {
+        "email": "person-h@example.org", "username": "person-h", "password": PASSWORT,
+        feld: "x" * 101,
+    })
+
+    assert konto.status_code == 422
+    assert await _anzahl(db, User) == konten_vorher
+    assert konto.cookies.get(JWT_COOKIE_NAME) is None
 
 
 async def test_einladung_gruppe_annehmen_gibt_uebergabe(db, org, leute, kurs_a, lernmodus) -> None:

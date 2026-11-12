@@ -16,7 +16,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -352,10 +352,16 @@ class EinloesungRead(BaseModel):
     uebergabe_url: str | None = None
 
 
+_Name = Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)]
+
+
 class KontoWrite(_Strict):
     email: EmailStr
     username: str = Field(min_length=1, max_length=100)
     password: str = Field(min_length=1, max_length=256)
+    # Optional, so the group sees a name instead of the username; trimmed, empty = not set.
+    vorname: _Name | None = None
+    nachname: _Name | None = None
 
 
 @router.get("/einladung/{token}", response_model=EinladungRead)
@@ -437,7 +443,10 @@ async def post_einladung_konto(
 
     neu = await create_user(
         request, db_session, AnonymousUser(),
-        UserCreate(email=payload.email, username=payload.username, password=payload.password),
+        UserCreate(
+            email=payload.email, username=payload.username, password=payload.password,
+            first_name=payload.vorname or "", last_name=payload.nachname or "",
+        ),
         org_id, signup_provider="invite",
     )
     try:
